@@ -71,11 +71,56 @@ saturn costs              # spending per month and person
 | `DATA_BUCKET` | the satellite data bucket; read files as `/vsis3/$DATA_BUCKET/...` with GDAL, terra or Rasters |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | the `mayin-data` MariaDB database (shared `aws_jobs` user) |
 
-## The database from your laptop
+## The database
+
+Jobs and laptops share one database login (`aws_jobs`), kept in AWS Secrets Manager. It can read and write the `mayin-data` MariaDB databases (`fld`, `hhd`, `maps`, `tmp`, ...) but has no admin rights. Nobody needs the password in their code.
+
+### From a job
+
+The connection details are in the job's environment: `DB_HOST`, `DB_PORT`, `DB_USER` and `DB_PASSWORD`.
+
+R (add `RMariaDB` to the project's `renv.lock`):
+
+```r
+con <- DBI::dbConnect(RMariaDB::MariaDB(),
+  host = Sys.getenv("DB_HOST"), port = as.integer(Sys.getenv("DB_PORT")),
+  user = Sys.getenv("DB_USER"), password = Sys.getenv("DB_PASSWORD"),
+  dbname = "fld")
+df <- DBI::dbGetQuery(con, "SELECT * FROM some_table LIMIT 10")
+DBI::dbDisconnect(con)
+```
+
+Julia (add `MySQL`, `DBInterface` and `DataFrames` to the `Project.toml`):
+
+```julia
+using MySQL, DBInterface, DataFrames
+con = DBInterface.connect(MySQL.Connection, ENV["DB_HOST"], ENV["DB_USER"], ENV["DB_PASSWORD"];
+                          port=parse(Int, ENV["DB_PORT"]), db="fld")
+df = DBInterface.execute(con, "SELECT * FROM some_table LIMIT 10") |> DataFrame
+DBInterface.close!(con)
+```
+
+### From your laptop
+
+The database isn't reachable from the internet, so open a tunnel first and leave it running in its own terminal:
 
 ```sh
-saturn db                 # tunnel; then connect to 127.0.0.1:3306 with the login it prints
+saturn db
 ```
+
+It connects `127.0.0.1:3306` on your laptop to the database (starting the small tunnel server on AWS if it's stopped) and prints the command that shows the login:
+
+```sh
+aws secretsmanager get-secret-value --secret-id <arn printed by saturn db> --query SecretString --output text
+```
+
+Then connect to host `127.0.0.1`, port `3306` with that user name and password, from any client:
+
+- Terminal: `brew install mysql-client`, then `mysql -h 127.0.0.1 -P 3306 -u aws_jobs -p`
+- A GUI such as DBeaver, TablePlus or Sequel Ace
+- R or Julia on your laptop: the code above with `host = "127.0.0.1"` and the login from Secrets Manager
+
+Press Ctrl-C in the tunnel's terminal when you're done.
 
 ## Good to know
 
