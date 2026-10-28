@@ -207,5 +207,6 @@ If something on your laptop already uses port 3306 (a local MySQL, say), connect
 ## Good to know
 
 - The workspace is shared by everyone. Keep to your own folder; if two people save the same file, the last save wins.
+- Folders you create in the workspace (in Finder, Terminal, R or Julia) show up in jobs, even while empty. This needs the current `saturn`: after `git pull`, run `saturn disconnect` and `saturn connect` once. Scripts are still safest creating their own output folders, e.g. `dir.create("../DOC/IMAGES", recursive = TRUE, showWarnings = FALSE)`.
 - `saturn connect` is macOS-only for now.
 - The database tunnel goes through a small server on AWS, which `saturn connect` starts if it's stopped.

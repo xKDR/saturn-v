@@ -303,6 +303,9 @@ EOF
   export AWS_CONFIG_FILE="$STATE_DIR/rclone-aws-config" AWS_PROFILE=rclone
   export RCLONE_CONFIG_S3_TYPE=s3 RCLONE_CONFIG_S3_PROVIDER=AWS RCLONE_CONFIG_S3_ENV_AUTH=true
   export RCLONE_CONFIG_S3_REGION=$AWS_DEFAULT_REGION
+  # S3 has no folders, only files; without a marker, an empty folder made on the laptop
+  # never reaches S3 (or the jobs). Jobs (S3 Files) read "dir/" markers as folders.
+  export RCLONE_CONFIG_S3_DIRECTORY_MARKERS=true
 }
 
 # Read-write, with working file locks: rclone serves NFS on localhost and we mount it
