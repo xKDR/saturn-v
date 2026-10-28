@@ -14,19 +14,19 @@ Ask an admin to create your AWS user and add it to the `saturn-v-users` group. Y
 
 ## Setup (once, on a Mac)
 
+Install the tools, then clone this repository into any folder you like and run the last three lines from inside it:
+
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew install awscli rclone
 brew install --cask session-manager-plugin
-git clone git@github.com:xKDR/saturn-v.git ~/REPOSITORIES/saturn-v
+git clone git@github.com:xKDR/saturn-v.git
+cd saturn-v
+echo "export PATH=\"$PWD/bin:\$PATH\"" >> ~/.zshrc
+echo '[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a' >> ~/.zshrc
 ```
 
-Then add these two lines to `~/.zshrc` and open a new terminal. The first puts `saturn` on your path; the second loads the job environment in every terminal while you're connected.
-
-```sh
-export PATH="$HOME/REPOSITORIES/saturn-v/bin:$PATH"
-[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a
-```
+The first `echo` puts `saturn` on your path (wherever you cloned it); the second loads the job environment in every terminal while you're connected. Open a new terminal afterwards.
 
 ## Each session
 
@@ -88,7 +88,7 @@ saturn run -e START=2014-01 <you>/project/main.jl
 The third line asks for a bigger machine (16 cores, 64 GB); the fourth sets an extra environment variable in the job.
 
 - **Julia:** packages come from the `Project.toml` (and `Manifest.toml`) next to the script or in a folder above it.
-- **R:** the image has R 4.6 with terra, sf, GDAL and the tidyverse. For anything else, keep an `renv.lock` next to the script (`renv::snapshot()` makes one).
+- **R:** the image has R 4.6 with terra, sf, GDAL, the tidyverse and more. For anything else, keep an `renv.lock` next to the script; see [R packages with renv](#r-packages-with-renv).
 - Packages are cached in the workspace, so only the first run installs them.
 - Anything the job writes under `/workspace/<you>/...` appears in `~/aws/workspace/<you>/...` within a minute or two.
 
@@ -101,6 +101,61 @@ The third line asks for a bigger machine (16 cores, 64 GB); the fourth sets an e
 You pay per second, only while a job runs. `SPOT=1` is about 70% cheaper but AWS may interrupt the job.
 
 The [examples](examples/) folder has a first script in each language; copy it into your workspace folder to try it.
+
+## R packages with renv
+
+[renv](https://rstudio.github.io/renv/) records which R packages (and versions) a project uses in a file called `renv.lock`. When a job's folder has one, the job installs exactly those packages before running your script, so it uses what you used on your laptop.
+
+If you know Julia: `renv.lock` is R's `Manifest.toml`. There's no `Project.toml`; renv works out which packages you use by reading your code (`library(x)`, `require(x)`, `x::f()`).
+
+You don't need renv if your script only uses packages already in the image (terra, sf, the tidyverse, ...). Add it when you need something else, or exact versions.
+
+**Start a project** (once, in R, with the project folder as the working directory):
+
+```r
+setwd("~/aws/workspace/<you>/project")
+renv::init()
+```
+
+This creates `renv.lock`, a `renv/` folder and an `.Rprofile`. From now on, R started in this folder uses the project's own packages.
+
+**Add a package:**
+
+```r
+install.packages("RMariaDB")
+renv::snapshot()
+```
+
+`install.packages()` only installs it on your laptop. **`renv::snapshot()` writes it to `renv.lock`**, which is what the job reads. If you forget it, the job won't have the package.
+
+**Check what's recorded**, and whether your code uses packages that aren't:
+
+```r
+renv::status()
+```
+
+**A package from GitHub instead of CRAN:**
+
+```r
+renv::install("rstudio/gt")
+renv::snapshot()
+```
+
+**Then run the job as usual:**
+
+```sh
+saturn run <you>/project/analysis.R
+```
+
+The first run installs the packages (pre-built for Linux, so usually a minute or two) and caches them in the workspace; later runs start straight away.
+
+**Is a package already in the image?** One way to check:
+
+```r
+cat(requireNamespace("RMariaDB", quietly = TRUE), "\n")
+```
+
+saved as `check.R` and run with `saturn run <you>/check.R` (about a cent).
 
 ## Watching and managing jobs
 
