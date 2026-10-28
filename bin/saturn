@@ -176,6 +176,7 @@ if approx: note.append("approximate: end time from the last log line")
 print(json.dumps({
     "task_id": task["taskArn"].rsplit("/", 1)[1], "who": who, "script": cmd[4] if len(cmd) > 4 else "",
     "language": task["containers"][0]["name"],
+    "task_definition": task.get("taskDefinitionArn", "").rsplit("/", 1)[-1],
     "started": start.isoformat(), "stopped": stop.isoformat(), "billed_seconds": seconds,
     "vcpu": vcpu, "memory_gb": gb, "storage_gb": disk, "spot": spot,
     "exit_code": task["containers"][0].get("exitCode"),
@@ -188,6 +189,35 @@ print("== cost: ${:.2f} for {:.1f} min at {:g} vCPU / {:g} GB (vCPU ${:.2f}, mem
     r["total_usd"], r["billed_seconds"] / 60, r["vcpu"], r["memory_gb"], c["vcpu"], c["memory"], c["storage"], r["note"]))' "$record"
   echo "$record" | aws s3 cp - "s3://$bucket/costs/tasks/$(date -u +%Y-%m)/$task_id.json" --only-show-errors
   aws s3 rm --only-show-errors "s3://$bucket/costs/pending/$task_id.json" || true
+  notify "$record"
+}
+
+# Posts a job's summary to the team's Mattermost channel, if a webhook is configured
+# (SSM SecureString /saturn-v/mattermost-webhook). Never fails the command.
+notify() {
+  local webhook
+  webhook=$(aws ssm get-parameter --name /saturn-v/mattermost-webhook --with-decryption \
+    --query Parameter.Value --output text 2>/dev/null) || return 0
+  python3 -c '
+import json, re, sys
+r = json.loads(sys.argv[1])
+ok = r.get("exit_code") == 0
+m = re.search(r"-r-(\d+)-(\d+):", r.get("task_definition", "") + ":")
+language = "R %s.%s" % m.groups() if m else {"julia": "Julia", "r": "R"}.get(r.get("language"), r.get("language", "?"))
+note = " (approximate)" if "approximate" in r.get("note", "") else ""
+rows = [
+    ("Who", r["who"]),
+    ("Language", language),
+    ("Machine", "%g vCPU / %g GB%s" % (r["vcpu"], r["memory_gb"], ", Spot" if r.get("spot") else "")),
+    ("Runtime", "%.1f min" % (r["billed_seconds"] / 60)),
+    ("Cost", "$%.2f%s" % (r["total_usd"], note)),
+    ("Exit code", str(r.get("exit_code"))),
+    ("Job", "`%s`" % r["task_id"][:8]),
+]
+text = "**%s Job %s**: `%s`\n\n| | |\n|---|---|\n" % ("✅" if ok else "❌", "finished" if ok else "failed", r.get("script") or "?")
+text += "\n".join("| **%s** | %s |" % row for row in rows)
+print(json.dumps({"text": text, "username": "saturn"}))' "$1" |
+    curl -s -o /dev/null --max-time 10 -X POST -H "Content-Type: application/json" --data @- "$webhook" || true
 }
 
 # The R task definition for a script: the R version its renv.lock was made with (read
