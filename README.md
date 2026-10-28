@@ -24,9 +24,10 @@ git clone git@github.com:xKDR/saturn-v.git
 cd saturn-v
 echo "export PATH=\"$PWD/bin:\$PATH\"" >> ~/.zshrc
 echo '[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a' >> ~/.zshrc
+aws configure set region ap-south-1 --profile aws-server
 ```
 
-The first `echo` puts `saturn` on your path (wherever you cloned it); the second loads the job environment in every terminal while you're connected. Open a new terminal afterwards.
+The first `echo` puts `saturn` on your path (wherever you cloned it); the second loads the job environment in every terminal while you're connected. The last line saves the AWS region (Mumbai), so signing in doesn't ask for it. Open a new terminal afterwards.
 
 ## Each session
 
@@ -35,7 +36,7 @@ aws login --profile aws-server
 saturn connect
 ```
 
-`aws login` opens your browser to sign in (region `ap-south-1`); a sign-in lasts up to 12 hours. `saturn connect` then:
+`aws login` opens your browser to sign in; a sign-in lasts up to 12 hours. If it asks for a region, enter `ap-south-1`. `saturn connect` then:
 
 - mounts the shared workspace at `~/aws/workspace` and the satellite data, read-only, at `~/aws/satellite`;
 - opens a tunnel to the database on `127.0.0.1:3306`;
