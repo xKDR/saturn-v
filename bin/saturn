@@ -25,6 +25,8 @@
 # -e sets an environment variable inside the job (repeatable).
 # Size and options (env vars): CPU=16384 MEMORY=65536 (default 4 vCPU / 16 GB; up to
 # 32768 / 249856), SPOT=1 (~70% cheaper, can be interrupted), DETACH=1 (return at once).
+# R jobs run on the R version (major.minor) of the renv.lock next to the script, or the
+# newest available; R_VERSION=4.5 chooses one.
 # Ctrl-C stops following a job; the job keeps running. Your laptop can sleep meanwhile.
 #
 # Sign in first with: aws login --profile aws-server   (region ap-south-1)
@@ -188,8 +190,30 @@ print("== cost: ${:.2f} for {:.1f} min at {:g} vCPU / {:g} GB (vCPU ${:.2f}, mem
   aws s3 rm --only-show-errors "s3://$bucket/costs/pending/$task_id.json" || true
 }
 
+# The R task definition for a script: the R version its renv.lock was made with (read
+# from S3, as the job will see it), R_VERSION if set, or the newest available.
+r_task_definition() {
+  local script=$1 lock version
+  version=${R_VERSION:-}
+  if [[ -z $version ]] && lock=$(aws s3 cp "s3://$(cfg workspace_bucket)/$(dirname "$script")/renv.lock" - 2>/dev/null); then
+    version=$(python3 -c 'import json, sys; print(".".join(json.loads(sys.argv[1])["R"]["Version"].split(".")[:2]))' "$lock")
+    echo "renv.lock was made with R $version" >&2
+  fi
+  python3 -c '
+import json, sys
+r = json.loads(sys.argv[1])["languages"]["r"]
+version, versions = sys.argv[2], r.get("versions", {})
+if not version:
+    print(r["task_definition"])
+elif version in versions:
+    print(versions[version])
+else:
+    sys.exit("saturn: R %s is not available on AWS (available: %s). "
+             "Make the renv.lock with one of those, or choose one with R_VERSION=..." % (version, ", ".join(sorted(versions))))' "$DEPLOYMENT" "$version"
+}
+
 run_job() {
-  local envs=() lang launcher overrides capacity task_arn task_id
+  local envs=() lang launcher overrides capacity task_arn task_id task_definition
   while [[ ${1:-} == -e ]]; do
     [[ ${2:-} == *=* ]] || die "-e needs NAME=VALUE"
     envs+=("$2")
@@ -197,6 +221,12 @@ run_job() {
   done
   [[ $# -ge 1 ]] || die "usage: saturn run [-e NAME=VALUE ...] path/to/script.jl|.R [args...]"
   lang=$(language_of "$1")
+  [[ -n $DEPLOYMENT ]] || DEPLOYMENT=$(deployment)
+  if [[ $lang == r ]]; then
+    task_definition=$(r_task_definition "$1") || exit 1
+  else
+    task_definition=$(cfg languages "$lang" task_definition)
+  fi
   launcher=$(cat "$SATURN_HOME/lib/launch-$lang.sh")
 
   overrides=$(ENVS=$(printf '%s\n' ${envs[@]+"${envs[@]}"}) python3 -c '
@@ -217,7 +247,7 @@ print(json.dumps(o))' "$(cfg languages "$lang" container)" "$launcher" "$@")
   # The subnets are public with no NAT, so the job needs a public IP to pull its image
   # and packages. No inbound ports are open.
   task_arn=$(aws ecs run-task --cluster "$(cfg cluster)" "${capacity[@]}" \
-    --task-definition "$(cfg languages "$lang" task_definition)" \
+    --task-definition "$task_definition" \
     --network-configuration "awsvpcConfiguration={subnets=[$(cfg subnets)],securityGroups=[$(cfg security_group)],assignPublicIp=ENABLED}" \
     --overrides "$overrides" \
     --query 'tasks[0].taskArn' --output text)

@@ -142,6 +142,8 @@ renv::install("rstudio/gt")
 renv::snapshot()
 ```
 
+**R versions.** A job runs on the same R version (major.minor) your `renv.lock` was made with, so packages that work on your laptop work in the job. R 4.5 and 4.6 are available; without a `renv.lock`, jobs use the newest. To choose one yourself: `R_VERSION=4.6 saturn run ...`. If your laptop has an R version AWS doesn't offer, `saturn run` says so; upgrade R on your laptop, then run `renv::update()` and `renv::snapshot()` in the project.
+
 **Then run the job as usual:**
 
 ```sh
