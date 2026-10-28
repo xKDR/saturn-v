@@ -1,0 +1,4 @@
+# Packages this script needs. Add more with `julia --project=.` then `]add Name`;
+# the job installs whatever is listed here (and in Manifest.toml) before running.
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
