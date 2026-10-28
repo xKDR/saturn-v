@@ -5,7 +5,8 @@ cd "$WORKSPACE/$(dirname "$1")" || exit 1
 
 # GDAL (terra, sf: /vsis3/ paths) reads S3 with these; R's own S3 packages use them too.
 # They come from the task role and last about 6 hours.
-creds=$(curl -s "http://169.254.170.2$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+# (The image has no curl, so R fetches them.)
+creds=$(Rscript -e 'cat(readLines(paste0("http://169.254.170.2", Sys.getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")), warn = FALSE))')
 field() { printf '%s' "$creds" | sed -n "s/.*\"$1\" *: *\"\([^\"]*\)\".*/\1/p"; }
 export AWS_ACCESS_KEY_ID=$(field AccessKeyId) AWS_SECRET_ACCESS_KEY=$(field SecretAccessKey) AWS_SESSION_TOKEN=$(field Token)
 
