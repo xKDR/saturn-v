@@ -179,7 +179,7 @@ R (add `RMariaDB` to the project's `renv.lock`):
 con <- DBI::dbConnect(RMariaDB::MariaDB(),
   host = Sys.getenv("DB_HOST"), port = as.integer(Sys.getenv("DB_PORT")),
   user = Sys.getenv("DB_USER"), password = Sys.getenv("DB_PASSWORD"),
-  dbname = "fld")
+  dbname = "fld", client.flag = RMariaDB::CLIENT_SSL)
 df <- DBI::dbGetQuery(con, "SELECT * FROM some_table LIMIT 10")
 DBI::dbDisconnect(con)
 ```
@@ -189,12 +189,16 @@ Julia (add `MySQL`, `DBInterface` and `DataFrames` to the `Project.toml`):
 ```julia
 using MySQL, DBInterface, DataFrames
 con = DBInterface.connect(MySQL.Connection, ENV["DB_HOST"], ENV["DB_USER"], ENV["DB_PASSWORD"];
-                          port=parse(Int, ENV["DB_PORT"]), db="fld")
+                          port=parse(Int, ENV["DB_PORT"]), db="fld", ssl_mode=:required)
 df = DBInterface.execute(con, "SELECT * FROM some_table LIMIT 10") |> DataFrame
 DBInterface.close!(con)
 ```
 
+The database only accepts encrypted connections. That's what `client.flag = RMariaDB::CLIENT_SSL` and `ssl_mode=:required` ask for; without them, R on a Mac fails with "Connections using insecure transport are prohibited".
+
 Other database clients work through the tunnel too: host `127.0.0.1`, port `3306`, and the user name and password from `~/.config/saturn-v/env`. For example `mysql -h 127.0.0.1 -P 3306 -u aws_jobs -p` (`brew install mysql-client`), or a GUI such as DBeaver, TablePlus or Sequel Ace.
+
+If `echo $DB_HOST` prints nothing, this terminal doesn't have the variables: it was opened before `saturn connect` (open a new one, or run `eval "$(saturn connect)"`), or the setup line is missing from `~/.zshrc`. In RStudio, run `readRenviron("~/.config/saturn-v/env")`.
 
 If something on your laptop already uses port 3306 (a local MySQL, say), connect with `DB_LOCAL_PORT=13306 saturn connect`; `DB_PORT` then says 13306.
 

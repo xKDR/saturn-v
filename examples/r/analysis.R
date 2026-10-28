@@ -25,7 +25,8 @@ if (requireNamespace("terra", quietly = TRUE)) {
 # Database, with the same code in both places (needs RMariaDB):
 #   con <- DBI::dbConnect(RMariaDB::MariaDB(), host = Sys.getenv("DB_HOST"),
 #                         port = as.integer(Sys.getenv("DB_PORT")), user = Sys.getenv("DB_USER"),
-#                         password = Sys.getenv("DB_PASSWORD"), dbname = "fld")
+#                         password = Sys.getenv("DB_PASSWORD"), dbname = "fld",
+#                         client.flag = RMariaDB::CLIENT_SSL)   # the database requires TLS
 
 writeLines(paste("Hello at", format(Sys.time(), tz = "UTC"), "UTC from", Sys.info()[["nodename"]]), "hello.txt")
 cat("Wrote hello.txt\n")
