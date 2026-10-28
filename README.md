@@ -170,7 +170,7 @@ saturn costs
 
 ## The database
 
-Jobs and laptops share one database login (`aws_jobs`). It can read and write the `mayin-data` MariaDB databases (`fld`, `hhd`, `maps`, `tmp`, ...) but has no admin rights. The password is kept in AWS Secrets Manager and reaches your code through `DB_PASSWORD`, so it never appears in a script.
+Jobs and laptops share one database login (`aws_jobs`). It can **only read** the `mayin-data` MariaDB databases (`fld`, `hhd`, `maps`, `tmp`, ...): queries and views, but no inserts, updates, deletes or table changes. Save results to files in the workspace instead. The password is kept in AWS Secrets Manager and reaches your code through `DB_PASSWORD`, so it never appears in a script.
 
 R (add `RMariaDB` to the project's `renv.lock`):
 
