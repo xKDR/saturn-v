@@ -2,14 +2,21 @@
 # saturn: run heavy Julia and R jobs on AWS Fargate from your laptop.
 #
 # Usage:
-#   saturn mount | unmount | status       # shared workspace at ~/aws/workspace, satellite data at ~/aws/satellite
+#   saturn connect                        # workspace, satellite data and database on this laptop
+#   saturn disconnect
+#   saturn status
 #   saturn run [-e NAME=VALUE ...] path/to/script.jl|.R [args...]
 #   saturn logs <task-id>                 # follow a job's output again
 #   saturn stop <task-id>
 #   saturn list                           # running jobs
 #   saturn costs                          # spending per month and person
 #   saturn cost <task-id>                 # (re)compute one job's cost
-#   saturn db                             # tunnel to the database on 127.0.0.1:3306
+#
+# After `saturn connect`, this laptop has the same environment variables as a job
+# (WORKSPACE, SATELLITE, DATA_BUCKET, AWS_REGION, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD),
+# pointing at the local mounts and the database tunnel, so the same code runs in both.
+# They're kept in ~/.config/saturn-v/env; `eval "$(saturn connect)"` also sets them in
+# the current terminal.
 #
 # The script path is relative to the workspace (~/aws/workspace on your laptop,
 # /workspace in the job). Julia: packages come from the nearest Project.toml. R: from
@@ -31,7 +38,7 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 mkdir -p "$STATE_DIR"
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2; }
-[[ ${1:-} =~ ^(mount|unmount|status|run|logs|stop|list|cost|costs|db)$ ]] || usage
+[[ ${1:-} =~ ^(connect|disconnect|status|run|logs|stop|list|cost|costs)$ ]] || usage
 
 die() { echo "saturn: $*" >&2; exit 1; }
 
@@ -332,15 +339,24 @@ do_unmount() {
 
 # --- Database tunnel ---------------------------------------------------------------
 # Through the EC2 server (SSM port forwarding), which is started if it's stopped.
-do_db() {
+# Runs in the background; its pid is kept so `saturn disconnect` can stop it.
+
+DB_LOCAL_PORT="${DB_LOCAL_PORT:-3306}"
+
+start_tunnel() {
   local instance host port state
+  if nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null; then
+    [[ -f $STATE_DIR/tunnel.pid ]] && kill -0 "$(cat "$STATE_DIR/tunnel.pid")" 2>/dev/null &&
+      { echo "Database tunnel already open on 127.0.0.1:$DB_LOCAL_PORT"; return; }
+    die "port $DB_LOCAL_PORT is in use by something else (a local MySQL?). Use: DB_LOCAL_PORT=13306 saturn connect"
+  fi
+  command -v session-manager-plugin >/dev/null || die "install the Session Manager plugin first: brew install --cask session-manager-plugin"
   instance=$(cfg instance_id)
   host=$(cfg db_host)
   port=$(cfg db_port)
-  local_port=${LOCAL_PORT:-$port}
   state=$(aws ec2 describe-instances --instance-ids "$instance" --query 'Reservations[0].Instances[0].State.Name' --output text)
   if [[ $state != running ]]; then
-    echo "Starting the tunnel server (was $state)..."
+    echo "Starting the database tunnel server (was $state)..."
     [[ $state == stopping ]] && aws ec2 wait instance-stopped --instance-ids "$instance"
     aws ec2 start-instances --instance-ids "$instance" >/dev/null
     aws ec2 wait instance-running --instance-ids "$instance"
@@ -350,17 +366,96 @@ do_db() {
     echo "Waiting for the tunnel server..."
     sleep 10
   done
-  echo "Database at 127.0.0.1:$local_port (Ctrl-C to close). Login:"
-  echo "  aws secretsmanager get-secret-value --secret-id $(cfg db_secret_arn) --query SecretString --output text"
-  exec aws ssm start-session --target "$instance" \
+  nohup aws ssm start-session --target "$instance" \
     --document-name AWS-StartPortForwardingSessionToRemoteHost \
-    --parameters "{\"host\":[\"$host\"],\"portNumber\":[\"$port\"],\"localPortNumber\":[\"$local_port\"]}"
+    --parameters "{\"host\":[\"$host\"],\"portNumber\":[\"$port\"],\"localPortNumber\":[\"$DB_LOCAL_PORT\"]}" \
+    >"$STATE_DIR/tunnel.log" 2>&1 </dev/null &
+  echo $! >"$STATE_DIR/tunnel.pid"
+  disown
+  for _ in $(seq 60); do nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null && break; sleep 1; done
+  nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null || die "the database tunnel didn't open; see $STATE_DIR/tunnel.log"
+  echo "Database tunnel open on 127.0.0.1:$DB_LOCAL_PORT"
+}
+
+stop_tunnel() {
+  if [[ -f $STATE_DIR/tunnel.pid ]]; then
+    kill "$(cat "$STATE_DIR/tunnel.pid")" 2>/dev/null && echo "Closed the database tunnel"
+    rm -f "$STATE_DIR/tunnel.pid"
+  fi
+  pkill -f "session-manager-plugin.*localPortNumber.*$DB_LOCAL_PORT" 2>/dev/null || true
+}
+
+# --- Local environment ---------------------------------------------------------------
+# The same variables a job has, pointing at this laptop's mounts and tunnel. Written as
+# KEY=value lines (readable only by you), which shells, R (readRenviron) and Julia can load.
+
+ENV_FILE="$STATE_DIR/env"
+
+write_env() {
+  local secret
+  secret=$(aws secretsmanager get-secret-value --secret-id "$(cfg db_secret_arn)" --query SecretString --output text)
+  (
+    umask 077
+    python3 -c '
+import json, sys
+s = json.loads(sys.argv[1])
+env = {
+    "WORKSPACE": sys.argv[2], "SATELLITE": sys.argv[3], "DATA_BUCKET": sys.argv[4], "AWS_REGION": sys.argv[5],
+    "DB_HOST": "127.0.0.1", "DB_PORT": sys.argv[6], "DB_USER": s["username"], "DB_PASSWORD": s["password"],
+}
+print("# Written by `saturn connect`, removed by `saturn disconnect`. Same names as inside a job.")
+for k, v in env.items(): print(f"{k}={v}")' "$secret" "$WORKSPACE_DIR" "$SATELLITE_DIR" "$(cfg data_bucket)" \
+      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" >"$ENV_FILE"
+  )
+  echo "Environment written to $ENV_FILE"
+}
+
+# Shell commands that set the variables, for: eval "$(saturn connect)".
+env_exports() {
+  python3 -c '
+import shlex, sys
+for line in open(sys.argv[1]):
+    line = line.rstrip("\n")
+    if line and not line.startswith("#"):
+        k, v = line.split("=", 1)
+        print(f"export {k}={shlex.quote(v)}")' "$ENV_FILE"
+}
+
+do_connect() {
+  {
+    do_mount
+    start_tunnel
+    write_env
+  } >&2
+  if [[ -t 1 ]]; then
+    echo "Connected. New terminals pick up the environment (see the README's one-line ~/.zshrc setup)."
+    echo "For this terminal: eval \"\$(saturn connect)\""
+  else
+    env_exports # called as eval "$(saturn connect)"
+  fi
+}
+
+do_disconnect() {
+  stop_tunnel
+  do_unmount
+  rm -f "$ENV_FILE"
+  echo "Disconnected"
+}
+
+do_status() {
+  mount | grep -E " on ($WORKSPACE_DIR|$SATELLITE_DIR) " || echo "workspace and satellite: not mounted"
+  if nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null; then
+    echo "database: tunnel open on 127.0.0.1:$DB_LOCAL_PORT"
+  else
+    echo "database: no tunnel"
+  fi
+  if [[ -f $ENV_FILE ]]; then echo "environment: $ENV_FILE"; else echo "environment: not written"; fi
 }
 
 case "$1" in
-mount) do_mount ;;
-unmount) do_unmount ;;
-status) mount | grep -E " on ($WORKSPACE_DIR|$SATELLITE_DIR) " || echo "not mounted" ;;
+connect) do_connect ;;
+disconnect) do_disconnect ;;
+status) do_status ;;
 run) shift; run_job "$@" ;;
 logs) follow "${2:?usage: saturn logs <task-id>}" ;;
 stop) aws ecs stop-task --cluster "$(cfg cluster)" --task "${2:?usage: saturn stop <task-id>}" \
@@ -369,5 +464,4 @@ stop) aws ecs stop-task --cluster "$(cfg cluster)" --task "${2:?usage: saturn st
 list) aws ecs list-tasks --cluster "$(cfg cluster)" --query 'taskArns[]' --output text | tr '\t' '\n' | sed 's|.*/||' ;;
 cost) record_cost "${2:?usage: saturn cost <task-id>}" ;;
 costs) show_costs ;;
-db) do_db ;;
 esac

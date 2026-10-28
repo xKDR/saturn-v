@@ -1,45 +1,91 @@
 # saturn-v
 
-Run heavy Julia and R jobs on AWS from your laptop.
+Run heavy Julia and R jobs on AWS from your laptop, with the same code in both places.
 
 You work on your laptop as usual. When a job needs more than your laptop has, `saturn run` sends it to a machine on AWS Fargate (up to 32 cores and 244 GB of memory), streams its output to your terminal, and records what it cost. Your laptop can sleep or disconnect while the job runs.
 
-Everyone shares one workspace: a folder that is `~/aws/workspace` on your laptop and `/workspace` inside every job. The satellite data is mounted read-only at `~/aws/satellite`.
+`saturn connect` gives your laptop the same setup a job has: the shared workspace, the satellite data and the database, under the same environment variable names. A script you try locally runs unchanged on AWS.
 
 The AWS side (buckets, cluster, permissions) is managed in [xKDR/AWS-Server](https://github.com/xKDR/AWS-Server).
 
 ## Getting access
 
-Ask an admin to create your AWS user and add you to the team. You'll get a sign-in link, a user name and a password.
+Ask an admin to create your AWS user and add it to the `saturn-v-users` group. You'll get a sign-in link, a user name and a password. At your first sign-in, set a new password and add MFA under **Security credentials**.
 
 ## Setup (once, on a Mac)
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew install awscli rclone
+brew install --cask session-manager-plugin
 git clone git@github.com:xKDR/saturn-v.git ~/REPOSITORIES/saturn-v
-echo 'export PATH="$HOME/REPOSITORIES/saturn-v/bin:$PATH"' >> ~/.zprofile    # then open a new terminal
+```
+
+Then add these two lines to `~/.zshrc` and open a new terminal. The first puts `saturn` on your path; the second loads the job environment in every terminal while you're connected.
+
+```sh
+export PATH="$HOME/REPOSITORIES/saturn-v/bin:$PATH"
+[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a
 ```
 
 ## Each session
 
 ```sh
-aws login --profile aws-server     # browser sign-in; region ap-south-1; lasts up to 12 hours
-saturn mount                       # ~/aws/workspace and ~/aws/satellite
+aws login --profile aws-server
+saturn connect
 ```
 
-If your sign-in expires, run `aws login --profile aws-server` again. Mounted folders pause meanwhile and carry on afterwards.
+`aws login` opens your browser to sign in (region `ap-south-1`); a sign-in lasts up to 12 hours. `saturn connect` then:
+
+- mounts the shared workspace at `~/aws/workspace` and the satellite data, read-only, at `~/aws/satellite`;
+- opens a tunnel to the database on `127.0.0.1:3306`;
+- writes the job environment to `~/.config/saturn-v/env` (readable only by you), which new terminals load.
+
+For the terminal you're in, use `eval "$(saturn connect)"` instead, which also sets the variables there. `saturn status` shows what's connected; `saturn disconnect` undoes it all.
+
+If your sign-in expires, run `aws login --profile aws-server` again. The mounted folders pause meanwhile and carry on afterwards.
+
+## The same code on your laptop and on AWS
+
+These variables are set in every job, and on your laptop after `saturn connect`:
+
+| Variable | In a job | On your laptop |
+| --- | --- | --- |
+| `WORKSPACE` | `/workspace` | `~/aws/workspace` |
+| `SATELLITE` | `/vsis3/<bucket>` (read straight from S3) | `~/aws/satellite` |
+| `DATA_BUCKET`, `AWS_REGION` | the satellite bucket and AWS region | the same |
+| `DB_HOST`, `DB_PORT` | the database | `127.0.0.1` and the tunnel port |
+| `DB_USER`, `DB_PASSWORD` | the shared `aws_jobs` login | the same |
+
+So build paths and connections from them, never from fixed paths:
+
+```r
+r <- terra::rast(file.path(Sys.getenv("SATELLITE"), "ntl/sl/rad/<file>.tif"))
+```
+
+```julia
+using Rasters, ArchGDAL
+r = Raster(joinpath(ENV["SATELLITE"], "ntl", "sl", "rad", "<file>.tif"); lazy=true)
+```
+
+Paths relative to your script's folder also work in both places.
+
+Reading satellite files on your laptop downloads them (about $0.11/GB), so try things on a few files or a small area there, and do the heavy reading in a job, where it's free.
+
+RStudio and other apps started from the Dock don't read `~/.zshrc`. In R, load the environment with `readRenviron("~/.config/saturn-v/env")`.
 
 ## Running a job
 
 Put your script in your own folder in the workspace, for example `~/aws/workspace/<you>/project/`, then:
 
 ```sh
-saturn run <you>/project/main.jl                       # Julia
-saturn run <you>/project/analysis.R                    # R
-CPU=16384 MEMORY=65536 saturn run <you>/project/main.jl  # bigger machine: 16 cores, 64 GB
-saturn run -e START=2014-01 <you>/project/main.jl      # pass settings as environment variables
+saturn run <you>/project/main.jl
+saturn run <you>/project/analysis.R
+CPU=16384 MEMORY=65536 saturn run <you>/project/main.jl
+saturn run -e START=2014-01 <you>/project/main.jl
 ```
+
+The third line asks for a bigger machine (16 cores, 64 GB); the fourth sets an extra environment variable in the job.
 
 - **Julia:** packages come from the `Project.toml` (and `Manifest.toml`) next to the script or in a folder above it.
 - **R:** the image has R 4.6 with terra, sf, GDAL and the tidyverse. For anything else, keep an `renv.lock` next to the script (`renv::snapshot()` makes one).
@@ -54,30 +100,22 @@ saturn run -e START=2014-01 <you>/project/main.jl      # pass settings as enviro
 
 You pay per second, only while a job runs. `SPOT=1` is about 70% cheaper but AWS may interrupt the job.
 
+The [examples](examples/) folder has a first script in each language; copy it into your workspace folder to try it.
+
 ## Watching and managing jobs
 
 ```sh
-saturn list               # running jobs
-saturn logs <task-id>     # follow a job's output again (Ctrl-C stops following, not the job)
+saturn list
+saturn logs <task-id>
 saturn stop <task-id>
-saturn costs              # spending per month and person
+saturn costs
 ```
 
-## Inside a job
-
-| Variable | Meaning |
-| --- | --- |
-| `WORKSPACE` | `/workspace`, the shared folder |
-| `DATA_BUCKET` | the satellite data bucket; read files as `/vsis3/$DATA_BUCKET/...` with GDAL, terra or Rasters |
-| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | the `mayin-data` MariaDB database (shared `aws_jobs` user) |
+`saturn list` shows running jobs. `saturn logs` follows a job's output again; Ctrl-C stops following, not the job. `saturn costs` shows spending per month and person.
 
 ## The database
 
-Jobs and laptops share one database login (`aws_jobs`), kept in AWS Secrets Manager. It can read and write the `mayin-data` MariaDB databases (`fld`, `hhd`, `maps`, `tmp`, ...) but has no admin rights. Nobody needs the password in their code.
-
-### From a job
-
-The connection details are in the job's environment: `DB_HOST`, `DB_PORT`, `DB_USER` and `DB_PASSWORD`.
+Jobs and laptops share one database login (`aws_jobs`). It can read and write the `mayin-data` MariaDB databases (`fld`, `hhd`, `maps`, `tmp`, ...) but has no admin rights. The password is kept in AWS Secrets Manager and reaches your code through `DB_PASSWORD`, so it never appears in a script.
 
 R (add `RMariaDB` to the project's `renv.lock`):
 
@@ -100,30 +138,12 @@ df = DBInterface.execute(con, "SELECT * FROM some_table LIMIT 10") |> DataFrame
 DBInterface.close!(con)
 ```
 
-### From your laptop
+Other database clients work through the tunnel too: host `127.0.0.1`, port `3306`, and the user name and password from `~/.config/saturn-v/env`. For example `mysql -h 127.0.0.1 -P 3306 -u aws_jobs -p` (`brew install mysql-client`), or a GUI such as DBeaver, TablePlus or Sequel Ace.
 
-The database isn't reachable from the internet, so open a tunnel first and leave it running in its own terminal:
-
-```sh
-saturn db
-```
-
-It connects `127.0.0.1:3306` on your laptop to the database (starting the small tunnel server on AWS if it's stopped) and prints the command that shows the login:
-
-```sh
-aws secretsmanager get-secret-value --secret-id <arn printed by saturn db> --query SecretString --output text
-```
-
-Then connect to host `127.0.0.1`, port `3306` with that user name and password, from any client:
-
-- Terminal: `brew install mysql-client`, then `mysql -h 127.0.0.1 -P 3306 -u aws_jobs -p`
-- A GUI such as DBeaver, TablePlus or Sequel Ace
-- R or Julia on your laptop: the code above with `host = "127.0.0.1"` and the login from Secrets Manager
-
-Press Ctrl-C in the tunnel's terminal when you're done.
+If something on your laptop already uses port 3306 (a local MySQL, say), connect with `DB_LOCAL_PORT=13306 saturn connect`; `DB_PORT` then says 13306.
 
 ## Good to know
 
 - The workspace is shared by everyone. Keep to your own folder; if two people save the same file, the last save wins.
-- Reading satellite files on your laptop downloads them (about $0.11/GB). Reading them inside a job is free, so do heavy reading there.
-- Mounting is macOS-only for now.
+- `saturn connect` is macOS-only for now.
+- The database tunnel goes through a small server on AWS, which `saturn connect` starts if it's stopped.

@@ -3,6 +3,10 @@
 # (cached in /workspace/.R), then runs the script with Rscript.
 cd "$WORKSPACE/$(dirname "$1")" || exit 1
 
+# Satellite data, read straight from S3 by GDAL (terra, sf). On a laptop, `saturn
+# connect` sets SATELLITE to the local mount instead, so code doesn't change.
+export SATELLITE="/vsis3/$DATA_BUCKET"
+
 # GDAL (terra, sf: /vsis3/ paths) reads S3 with these; R's own S3 packages use them too.
 # They come from the task role and last about 6 hours.
 # (The image has no curl, so R fetches them.)
