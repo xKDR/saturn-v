@@ -13,7 +13,7 @@
 #   saturn cost <task-id>                 # (re)compute one job's cost
 #
 # After `saturn connect`, this laptop has the same environment variables as a job
-# (WORKSPACE, SATELLITE, DATASETS, DATA_BUCKET, AWS_REGION, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD),
+# (WORKSPACE, MY_WORKSPACE, SATELLITE, DATASETS, DATA_BUCKET, AWS_REGION, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD),
 # pointing at the local mounts and the database tunnel, so the same code runs in both.
 # They're kept in ~/.config/saturn-v/env; `eval "$(saturn connect)"` also sets them in
 # the current terminal.
@@ -40,9 +40,13 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 mkdir -p "$STATE_DIR"
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2; }
-[[ ${1:-} =~ ^(connect|disconnect|status|run|logs|stop|list|cost|costs)$ ]] || usage
+[[ ${1:-} =~ ^(connect|disconnect|status|run|logs|stop|list|cost|costs|__tunnel-keeper)$ ]] || usage
 
 die() { echo "saturn: $*" >&2; exit 1; }
+
+# The signed-in AWS user name, and their folder in the workspace (lower case, e.g. sanjuktha.athreya).
+me() { aws sts get-caller-identity --query Arn --output text | sed 's|.*/||'; }
+my_folder() { me | tr '[:upper:]' '[:lower:]'; }
 
 # --- Deployment settings ---------------------------------------------------------
 # Published by xKDR/AWS-Server as the SSM parameter /saturn-v/deployment on every
@@ -185,39 +189,12 @@ print(json.dumps({
   python3 -c '
 import json, sys
 r = json.loads(sys.argv[1]); c = r["cost_usd"]
-print("== cost: ${:.2f} for {:.1f} min at {:g} vCPU / {:g} GB (vCPU ${:.2f}, memory ${:.2f}, disk ${:.2f}; {})".format(
-    r["total_usd"], r["billed_seconds"] / 60, r["vcpu"], r["memory_gb"], c["vcpu"], c["memory"], c["storage"], r["note"]))' "$record"
+money = lambda x: ("$%.3f" if x < 0.1 else "$%.2f") % x
+print("== cost: {} for {:.1f} min at {:g} vCPU / {:g} GB (vCPU {}, memory {}, disk {}; {})".format(
+    money(r["total_usd"]), r["billed_seconds"] / 60, r["vcpu"], r["memory_gb"],
+    money(c["vcpu"]), money(c["memory"]), money(c["storage"]), r["note"]))' "$record"
   echo "$record" | aws s3 cp - "s3://$bucket/costs/tasks/$(date -u +%Y-%m)/$task_id.json" --only-show-errors
   aws s3 rm --only-show-errors "s3://$bucket/costs/pending/$task_id.json" || true
-  notify "$record"
-}
-
-# Posts a job's summary to the team's Mattermost channel, if a webhook is configured
-# (SSM SecureString /saturn-v/mattermost-webhook). Never fails the command.
-notify() {
-  local webhook
-  webhook=$(aws ssm get-parameter --name /saturn-v/mattermost-webhook --with-decryption \
-    --query Parameter.Value --output text 2>/dev/null) || return 0
-  python3 -c '
-import json, re, sys
-r = json.loads(sys.argv[1])
-ok = r.get("exit_code") == 0
-m = re.search(r"-r-(\d+)-(\d+):", r.get("task_definition", "") + ":")
-language = "R %s.%s" % m.groups() if m else {"julia": "Julia", "r": "R"}.get(r.get("language"), r.get("language", "?"))
-note = " (approximate)" if "approximate" in r.get("note", "") else ""
-rows = [
-    ("Who", r["who"]),
-    ("Language", language),
-    ("Machine", "%g vCPU / %g GB%s" % (r["vcpu"], r["memory_gb"], ", Spot" if r.get("spot") else "")),
-    ("Runtime", "%.1f min" % (r["billed_seconds"] / 60)),
-    ("Cost", "$%.2f%s" % (r["total_usd"], note)),
-    ("Exit code", str(r.get("exit_code"))),
-    ("Job", "`%s`" % r["task_id"][:8]),
-]
-text = "**%s Job %s**: `%s`\n\n| | |\n|---|---|\n" % ("✅" if ok else "❌", "finished" if ok else "failed", r.get("script") or "?")
-text += "\n".join("| **%s** | %s |" % row for row in rows)
-print(json.dumps({"text": text, "username": "saturn"}))' "$1" |
-    curl -s -o /dev/null --max-time 10 -X POST -H "Content-Type: application/json" --data @- "$webhook" || true
 }
 
 # The R task definition for a script: the R version its renv.lock was made with (read
@@ -261,6 +238,7 @@ run_job() {
 
   local helper="$SATURN_HOME/lib/saturn.R"
   [[ $lang == julia ]] && helper="$SATURN_HOME/lib/saturn.jl"
+  envs=("MY_WORKSPACE=/workspace/$(my_folder)" ${envs[@]+"${envs[@]}"})
   overrides=$(ENVS=$(printf '%s\n' ${envs[@]+"${envs[@]}"}) HELPER_FILE=$helper python3 -c '
 import json, os, sys
 container, launcher, args = sys.argv[1], sys.argv[2], sys.argv[3:]
@@ -279,7 +257,7 @@ print(json.dumps(o))' "$(cfg languages "$lang" container)" "$launcher" "$@")
 
   # The subnets are public with no NAT, so the job needs a public IP to pull its image
   # and packages. No inbound ports are open.
-  task_arn=$(aws ecs run-task --cluster "$(cfg cluster)" "${capacity[@]}" \
+  task_arn=$(aws ecs run-task --cluster "$(cfg cluster)" "${capacity[@]}" --started-by "$(me | cut -c1-36)" \
     --task-definition "$task_definition" \
     --network-configuration "awsvpcConfiguration={subnets=[$(cfg subnets)],securityGroups=[$(cfg security_group)],assignPublicIp=ENABLED}" \
     --overrides "$overrides" \
@@ -324,16 +302,65 @@ DATASETS_DIR="${DATASETS_DIR:-$HOME/aws/datasets}"
 VFS_FLAGS=(--vfs-cache-mode full --vfs-cache-max-size 20G --dir-cache-time 30s --log-level NOTICE)
 
 is_mounted() { mount | grep -q " on $1 "; }
+port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 
-# rclone can't read `aws login` sessions directly, so give it a profile whose
-# credential_process asks the AWS CLI. It refreshes automatically; if the session
-# expires, sign in again (no remount needed).
+# The mounts use an access key on your own account, which `saturn connect` creates once
+# and keeps in $STATE_DIR/mount-credentials, so they keep working after the 12-hour
+# `aws login` expires. AWS only lets such keys use the buckets, and removing you from
+# the saturn-v-users group disables it. IAM allows two keys per user, so two computers;
+# saturn only ever deletes the key it made on this computer.
+with_mount_key() {
+  AWS_SHARED_CREDENTIALS_FILE="$STATE_DIR/mount-credentials" AWS_CONFIG_FILE=/dev/null AWS_PROFILE=rclone "$@"
+}
+
+mount_key_works() { with_mount_key aws s3api head-bucket --bucket "$(cfg workspace_bucket)" >/dev/null 2>&1; }
+
+# A key that can do more than the buckets (e.g. an admin's, outside saturn-v-users)
+# must not sit on a laptop: delete it and mount with the sign-in instead.
+mount_key_too_powerful() {
+  local id
+  with_mount_key aws iam list-access-keys >/dev/null 2>&1 || return 1
+  id=$(sed -n 's/^aws_access_key_id = //p' "$STATE_DIR/mount-credentials")
+  echo "(your account isn't limited like saturn-v-users, so no mount key is kept for it)"
+  aws iam delete-access-key --user-name "$(me)" --access-key-id "$id"
+  rm -f "$STATE_DIR/mount-credentials"
+}
+
+make_mount_key() {
+  local user old keys key
+  user=$(me) || return 1
+  old=$(sed -n 's/^aws_access_key_id = //p' "$STATE_DIR/mount-credentials" 2>/dev/null)
+  [[ -n $old ]] && aws iam delete-access-key --user-name "$user" --access-key-id "$old" 2>/dev/null
+  keys=($(aws iam list-access-keys --user-name "$user" \
+    --query 'sort_by(AccessKeyMetadata, &CreateDate)[].AccessKeyId' --output text)) || return 1
+  if ((${#keys[@]} >= 2)); then
+    echo "(you already have two access keys, the most AWS allows; delete one you no longer use"
+    echo " under Security credentials in the AWS console, then run saturn connect again)"
+    return 1
+  fi
+  key=($(aws iam create-access-key --user-name "$user" \
+    --query 'AccessKey.[AccessKeyId, SecretAccessKey]' --output text)) || return 1
+  (
+    umask 077
+    printf '[rclone]\naws_access_key_id = %s\naws_secret_access_key = %s\n' "${key[0]}" "${key[1]}" \
+      >"$STATE_DIR/mount-credentials"
+  )
+  # A new key takes a few seconds to work everywhere in AWS.
+  for _ in 1 2 3 4 5 6; do mount_key_works && return 0; sleep 5; done
+}
+
 use_rclone_credentials() {
   local real_config="${AWS_CONFIG_FILE:-$HOME/.aws/config}"
-  cat >"$STATE_DIR/rclone-aws-config" <<EOF
+  if { mount_key_works || make_mount_key; } && ! mount_key_too_powerful; then
+    : >"$STATE_DIR/rclone-aws-config"
+    export AWS_SHARED_CREDENTIALS_FILE="$STATE_DIR/mount-credentials"
+  else
+    echo "(no mount key; the mounts use your sign-in and pause when it expires)"
+    cat >"$STATE_DIR/rclone-aws-config" <<EOF
 [profile rclone]
 credential_process = /usr/bin/env AWS_CONFIG_FILE=$real_config $(command -v aws) configure export-credentials --profile $AWS_PROFILE --format process
 EOF
+  fi
   export AWS_CONFIG_FILE="$STATE_DIR/rclone-aws-config" AWS_PROFILE=rclone
   export RCLONE_CONFIG_S3_TYPE=s3 RCLONE_CONFIG_S3_PROVIDER=AWS RCLONE_CONFIG_S3_ENV_AUTH=true
   export RCLONE_CONFIG_S3_REGION=$AWS_DEFAULT_REGION
@@ -349,11 +376,18 @@ mount_workspace() {
   local bucket=$1 port=${WORKSPACE_PORT:-52049}
   if is_mounted "$WORKSPACE_DIR"; then echo "$WORKSPACE_DIR already mounted"; return; fi
   mkdir -p "$WORKSPACE_DIR"
+  if [[ $(uname) == Linux ]]; then
+    # FUSE: the kernel handles file locks itself, so SVN and SQLite work here too.
+    rclone mount "s3:$bucket" "$WORKSPACE_DIR" --daemon "${VFS_FLAGS[@]}" --vfs-links \
+      --log-file "$STATE_DIR/rclone-workspace.log"
+    echo "Mounted the workspace at $WORKSPACE_DIR"
+    return
+  fi
   # --vfs-links: S3 has no symlinks, so each is stored as a small "<name>.rclonelink" file.
   nohup rclone serve nfs "s3:$bucket" --addr "127.0.0.1:$port" "${VFS_FLAGS[@]}" --vfs-links \
     --log-file "$STATE_DIR/rclone-workspace.log" >/dev/null 2>&1 &
   echo $! >"$STATE_DIR/rclone-workspace.pid"
-  until nc -z 127.0.0.1 "$port" 2>/dev/null; do sleep 0.5; done
+  until port_open "$port"; do sleep 0.5; done
   mount -t nfs -o "port=$port,mountport=$port,tcp,vers=3,locallocks,hard,intr" "127.0.0.1:/" "$WORKSPACE_DIR"
   echo "Mounted the workspace at $WORKSPACE_DIR"
 }
@@ -363,7 +397,9 @@ mount_readonly() {
   local bucket=$1 dir=$2 name=$3
   if is_mounted "$dir"; then echo "$dir already mounted"; return; fi
   mkdir -p "$dir"
-  rclone nfsmount "s3:$bucket" "$dir" --daemon --volname "$name" --read-only "${VFS_FLAGS[@]}" \
+  local how=nfsmount
+  [[ $(uname) == Linux ]] && how=mount
+  rclone "$how" "s3:$bucket" "$dir" --daemon --volname "$name" --read-only "${VFS_FLAGS[@]}" \
     --log-file "$STATE_DIR/rclone-$name.log"
   echo "Mounted $name at $dir (read-only)"
 }
@@ -373,51 +409,79 @@ svn_ignore_appledouble() {
   local svncfg="$HOME/.subversion/config"
   [[ -f $svncfg ]] || return 0
   grep -q '^global-ignores.*\._\*' "$svncfg" && return 0
-  if grep -q '^global-ignores' "$svncfg"; then
-    sed -i '' 's/^global-ignores = /global-ignores = ._* .DS_Store /' "$svncfg"
-  else
-    sed -i '' 's/^\[miscellany\]$/[miscellany]\
-global-ignores = ._* .DS_Store *.o *.lo *.la *.al .libs *.so *.so.[0-9]* *.a *.pyc *.pyo __pycache__ *.rej *~ #*# .#* .*.swp/' "$svncfg"
-  fi
+  python3 -c '
+import re, sys
+path = sys.argv[1]; s = open(path).read()
+if re.search(r"^global-ignores", s, re.M):
+    s = re.sub(r"^global-ignores = ", "global-ignores = ._* .DS_Store ", s, count=1, flags=re.M)
+else:
+    s = re.sub(r"^\[miscellany\]$", "[miscellany]\nglobal-ignores = ._* .DS_Store *.o *.lo *.la *.al .libs *.so *.so.[0-9]* *.a *.pyc *.pyo __pycache__ *.rej *~ #*# .#* .*.swp", s, count=1, flags=re.M)
+open(path, "w").write(s)' "$svncfg"
 }
 
 do_mount() {
-  [[ $(uname) == Darwin ]] || die "mounting is only set up for macOS so far"
-  command -v rclone >/dev/null || die "install rclone first: brew install rclone"
+  command -v rclone >/dev/null || die "install rclone first (see the README's setup)"
+  if [[ $(uname) == Linux ]]; then
+    command -v fusermount3 >/dev/null || command -v fusermount >/dev/null ||
+      die "install FUSE first: sudo apt install fuse3 (Debian/Ubuntu) or sudo dnf install fuse3 (Fedora)"
+  elif [[ $(uname) != Darwin ]]; then
+    die "mounting works on macOS and Linux only"
+  fi
   local workspace data datasets
   workspace=$(cfg workspace_bucket)
   data=$(cfg data_bucket)
   datasets=$(cfg datasets_bucket)
-  use_rclone_credentials
-  mount_workspace "$workspace"
-  mount_readonly "$data" "$SATELLITE_DIR" satellite
-  mount_readonly "$datasets" "$DATASETS_DIR" datasets
+  # In a subshell: the mount key's settings must apply to rclone only, not to the
+  # commands that follow (which run as you).
+  (
+    use_rclone_credentials
+    mount_workspace "$workspace"
+    mount_readonly "$data" "$SATELLITE_DIR" satellite
+    mount_readonly "$datasets" "$DATASETS_DIR" datasets
+  ) || exit 1
   svn_ignore_appledouble
 }
 
 do_unmount() {
   for dir in "$WORKSPACE_DIR" "$SATELLITE_DIR" "$DATASETS_DIR"; do
     if is_mounted "$dir"; then
-      umount "$dir" || die "$dir is busy: cd out of it (and close files there) first"
+      if [[ $(uname) == Linux ]]; then
+        fusermount3 -u "$dir" 2>/dev/null || fusermount -u "$dir" || die "$dir is busy: cd out of it (and close files there) first"
+      else
+        umount "$dir" || die "$dir is busy: cd out of it (and close files there) first"
+      fi
       echo "Unmounted $dir"
     fi
   done
   [[ -f $STATE_DIR/rclone-workspace.pid ]] && kill "$(cat "$STATE_DIR/rclone-workspace.pid")" 2>/dev/null
   rm -f "$STATE_DIR/rclone-workspace.pid"
-  pkill -f "rclone (nfsmount|serve nfs) s3:" || true
+  pkill -f "rclone (nfsmount|serve nfs|mount) s3:" || true
 }
 
 # --- Database tunnel ---------------------------------------------------------------
 # Through the EC2 server (SSM port forwarding), which is started if it's stopped.
 # Runs in the background; its pid is kept so `saturn disconnect` can stop it.
 
-DB_LOCAL_PORT="${DB_LOCAL_PORT:-3306}"
+# The local port: DB_LOCAL_PORT if set (remembered for later commands), else the last one used, else 3306.
+DB_LOCAL_PORT="${DB_LOCAL_PORT:-$(cat "$STATE_DIR/db-port" 2>/dev/null || echo 3306)}"
+our_tunnel() { [[ -f $STATE_DIR/tunnel.pid ]] && kill -0 "$(cat "$STATE_DIR/tunnel.pid")" 2>/dev/null; }
+
+# Is the tunnel really working? The database sends a greeting as soon as a connection
+# opens; a tunnel that's broken at the far end accepts the connection but stays silent.
+tunnel_alive() {
+  perl -MIO::Socket::INET -e '
+    my $s = IO::Socket::INET->new(PeerAddr => "127.0.0.1", PeerPort => $ARGV[0], Timeout => 5) or exit 1;
+    local $SIG{ALRM} = sub { exit 1 }; alarm 8;
+    sysread($s, my $buf, 4) or exit 1; exit 0' "$DB_LOCAL_PORT"
+}
 
 start_tunnel() {
   local instance host port state
-  if nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null; then
-    [[ -f $STATE_DIR/tunnel.pid ]] && kill -0 "$(cat "$STATE_DIR/tunnel.pid")" 2>/dev/null &&
-      { echo "Database tunnel already open on 127.0.0.1:$DB_LOCAL_PORT"; return; }
+  if our_tunnel; then
+    if tunnel_alive; then echo "Database tunnel already open on 127.0.0.1:$DB_LOCAL_PORT"; return; fi
+    echo "The database tunnel stopped answering; reopening it"
+    stop_tunnel
+  elif port_open "$DB_LOCAL_PORT"; then
     die "port $DB_LOCAL_PORT is in use by something else (a local MySQL?). Use: DB_LOCAL_PORT=13306 saturn connect"
   fi
   command -v session-manager-plugin >/dev/null || die "install the Session Manager plugin first: brew install --cask session-manager-plugin"
@@ -441,10 +505,34 @@ start_tunnel() {
     --parameters "{\"host\":[\"$host\"],\"portNumber\":[\"$port\"],\"localPortNumber\":[\"$DB_LOCAL_PORT\"]}" \
     >"$STATE_DIR/tunnel.log" 2>&1 </dev/null &
   echo $! >"$STATE_DIR/tunnel.pid"
+  echo "$DB_LOCAL_PORT" >"$STATE_DIR/db-port"
   disown
-  for _ in $(seq 60); do nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null && break; sleep 1; done
-  nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null || die "the database tunnel didn't open; see $STATE_DIR/tunnel.log"
+  for _ in $(seq 60); do port_open "$DB_LOCAL_PORT" && break; sleep 1; done
+  port_open "$DB_LOCAL_PORT" || die "the database tunnel didn't open; see $STATE_DIR/tunnel.log"
   echo "Database tunnel open on 127.0.0.1:$DB_LOCAL_PORT"
+}
+
+# Runs in the background while connected: every 4 minutes it checks the tunnel, which
+# also counts as activity (SSM closes idle sessions after ~20 minutes), and reopens it
+# if it died, e.g. after the database restarted. Needs a valid sign-in to reopen.
+tunnel_keeper() {
+  while [[ -f $ENV_FILE ]]; do
+    sleep 240
+    [[ -f $ENV_FILE ]] || break
+    { our_tunnel && tunnel_alive; } || (start_tunnel) || true # in a subshell: a failed reopen must not stop the keeper
+  done
+}
+
+start_keeper() {
+  stop_keeper
+  nohup "$0" __tunnel-keeper >>"$STATE_DIR/tunnel.log" 2>&1 </dev/null &
+  echo $! >"$STATE_DIR/keeper.pid"
+  disown
+}
+
+stop_keeper() {
+  [[ -f $STATE_DIR/keeper.pid ]] && kill "$(cat "$STATE_DIR/keeper.pid")" 2>/dev/null
+  rm -f "$STATE_DIR/keeper.pid"
 }
 
 stop_tunnel() {
@@ -472,11 +560,12 @@ s = json.loads(sys.argv[1])
 env = {
     "WORKSPACE": sys.argv[2], "SATELLITE": sys.argv[3], "DATA_BUCKET": sys.argv[4], "AWS_REGION": sys.argv[5],
     "DATASETS": sys.argv[7], "SATURN_R": sys.argv[8] + "/lib/saturn.R", "SATURN_JL": sys.argv[8] + "/lib/saturn.jl",
+    "MY_WORKSPACE": sys.argv[2] + "/" + sys.argv[9],
     "DB_HOST": "127.0.0.1", "DB_PORT": sys.argv[6], "DB_USER": s["username"], "DB_PASSWORD": s["password"],
 }
 print("# Written by `saturn connect`, removed by `saturn disconnect`. Same names as inside a job.")
 for k, v in env.items(): print(f"{k}={v}")' "$secret" "$WORKSPACE_DIR" "$SATELLITE_DIR" "$(cfg data_bucket)" \
-      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$DATASETS_DIR" "$SATURN_HOME" >"$ENV_FILE"
+      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$DATASETS_DIR" "$SATURN_HOME" "$(my_folder)" >"$ENV_FILE"
   )
   echo "Environment written to $ENV_FILE"
 }
@@ -495,8 +584,10 @@ for line in open(sys.argv[1]):
 do_connect() {
   {
     do_mount
+    mkdir -p "$WORKSPACE_DIR/$(my_folder)" && echo "Your folder: $WORKSPACE_DIR/$(my_folder)"
     start_tunnel
     write_env
+    start_keeper
   } >&2
   if [[ -t 1 ]]; then
     echo "Connected. New terminals pick up the environment (see the README's one-line ~/.zshrc setup)."
@@ -507,6 +598,7 @@ do_connect() {
 }
 
 do_disconnect() {
+  stop_keeper
   stop_tunnel
   do_unmount
   rm -f "$ENV_FILE"
@@ -515,8 +607,12 @@ do_disconnect() {
 
 do_status() {
   mount | grep -E " on ($WORKSPACE_DIR|$SATELLITE_DIR|$DATASETS_DIR) " || echo "workspace, satellite and datasets: not mounted"
-  if nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null; then
+  if our_tunnel && tunnel_alive; then
     echo "database: tunnel open on 127.0.0.1:$DB_LOCAL_PORT"
+  elif our_tunnel; then
+    echo "database: tunnel not answering (run saturn connect to reopen it)"
+  elif port_open "$DB_LOCAL_PORT"; then
+    echo "database: no tunnel (port $DB_LOCAL_PORT is used by something else; connect with DB_LOCAL_PORT=13306)"
   else
     echo "database: no tunnel"
   fi
@@ -535,4 +631,5 @@ stop) aws ecs stop-task --cluster "$(cfg cluster)" --task "${2:?usage: saturn st
 list) aws ecs list-tasks --cluster "$(cfg cluster)" --query 'taskArns[]' --output text | tr '\t' '\n' | sed 's|.*/||' ;;
 cost) record_cost "${2:?usage: saturn cost <task-id>}" ;;
 costs) show_costs ;;
+__tunnel-keeper) tunnel_keeper ;;
 esac

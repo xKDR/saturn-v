@@ -12,7 +12,9 @@ The AWS side (buckets, cluster, permissions) is managed in [xKDR/AWS-Server](htt
 
 Ask an admin to create your AWS user and add it to the `saturn-v-users` group. You'll get a sign-in link, a user name and a password. At your first sign-in, set a new password and add MFA under **Security credentials**.
 
-## Setup (once, on a Mac)
+## Setup (once)
+
+### On a Mac
 
 Install the tools, then clone this repository into any folder you like and run the last three lines from inside it:
 
@@ -29,6 +31,29 @@ aws configure set region ap-south-1 --profile aws-server
 
 The first `echo` puts `saturn` on your path (wherever you cloned it); the second loads the job environment in every terminal while you're connected. The last line saves the AWS region (Mumbai), so signing in doesn't ask for it. Open a new terminal afterwards.
 
+### On Linux
+
+The same tools, from each project's own packages. On Debian or Ubuntu (on Fedora, use `dnf` and the `.rpm` plugin noted below):
+
+```sh
+sudo apt install -y git unzip curl python3 perl fuse3
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
+unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install
+curl -fsSL https://rclone.org/install.sh | sudo bash
+curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
+sudo dpkg -i /tmp/smp.deb
+git clone git@github.com:xKDR/saturn-v.git
+cd saturn-v
+echo "export PATH=\"$PWD/bin:\$PATH\"" >> ~/.bashrc
+echo '[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a' >> ~/.bashrc
+aws configure set region ap-south-1 --profile aws-server
+```
+
+- **Fedora/RHEL:** `sudo dnf install -y git unzip curl python3 perl fuse3`, and the plugin with `sudo dnf install -y https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm`. On ARM machines use `ubuntu_arm64` / `linux_arm64` in the plugin URL.
+- **Zsh users:** use `~/.zshrc` instead of `~/.bashrc`.
+- **Machines without a browser** (a server over SSH): sign in with `aws login --profile aws-server --remote`. It prints a link to open on any device, then asks for the code that page shows.
+- On Linux, the mounts use FUSE.
+
 ## Each session
 
 ```sh
@@ -40,11 +65,29 @@ saturn connect
 
 - mounts the shared workspace at `~/aws/workspace`, and the satellite data and the [datasets](#datasets-parquet), read-only, at `~/aws/satellite` and `~/aws/datasets`;
 - opens a tunnel to the database on `127.0.0.1:3306`;
-- writes the job environment to `~/.config/saturn-v/env` (readable only by you), which new terminals load.
+- creates **your own folder** in the workspace, `~/aws/workspace/<your user name>` (see [Organising the workspace](#organising-the-workspace));
+- writes the job environment to `~/.config/saturn-v/env` (readable only by you), which new terminals load;
+- keeps the tunnel healthy in the background, reopening it if it drops.
 
 For the terminal you're in, use `eval "$(saturn connect)"` instead, which also sets the variables there. `saturn status` shows what's connected; `saturn disconnect` undoes it all.
 
-If your sign-in expires, run `aws login --profile aws-server` again. The mounted folders pause meanwhile and carry on afterwards.
+The first `saturn connect` creates a mount key on your account (kept in `~/.config/saturn-v/`), which AWS only lets use the three buckets. The mounts use it, so they keep working after your 12-hour sign-in expires. AWS allows two keys per person, so two computers; for a third, delete an old key under Security credentials in the AWS console. For everything else (running jobs, reopening the tunnel), sign in again with `aws login --profile aws-server` when asked.
+
+## Organising the workspace
+
+Everyone shares one workspace, so keep to this layout:
+
+| Folder | For |
+| --- | --- |
+| `<your user name>/` (e.g. `sanjuktha.athreya/`) | your own work. `saturn connect` creates it; `MY_WORKSPACE` points to it, on your laptop and in your jobs |
+| `shared/<project>/` | work several people use; agree on the folder name with them |
+| `db/`, `costs/`, `.julia/`, `.R/` | used by saturn itself; leave them alone |
+
+In scripts, write outputs relative to `MY_WORKSPACE` (or to the script's own folder), never to a fixed path:
+
+```r
+saveRDS(results, file.path(Sys.getenv("MY_WORKSPACE"), "project", "results.rds"))
+```
 
 ## The same code on your laptop and on AWS
 
@@ -53,6 +96,7 @@ These variables are set in every job, and on your laptop after `saturn connect`:
 | Variable | In a job | On your laptop |
 | --- | --- | --- |
 | `WORKSPACE` | `/workspace` | `~/aws/workspace` |
+| `MY_WORKSPACE` | `/workspace/<your user name>` | `~/aws/workspace/<your user name>` |
 | `SATELLITE` | `/vsis3/<bucket>` (read straight from S3) | `~/aws/satellite` |
 | `DATASETS` | `s3://<bucket>` | `~/aws/datasets` |
 | `DATA_BUCKET`, `AWS_REGION` | the satellite bucket and AWS region | the same |
@@ -74,7 +118,7 @@ Paths relative to your script's folder also work in both places.
 
 Reading satellite files on your laptop downloads them (about $0.11/GB), so try things on a few files or a small area there, and do the heavy reading in a job, where it's free.
 
-RStudio and other apps started from the Dock don't read `~/.zshrc`. In R, load the environment with `readRenviron("~/.config/saturn-v/env")`.
+RStudio and other apps started from the Dock (or a desktop launcher) don't read your shell's startup file. In R, load the environment with `readRenviron("~/.config/saturn-v/env")`.
 
 ## Running a job
 
@@ -172,6 +216,8 @@ saturn costs
 
 `saturn list` shows running jobs. `saturn logs` follows a job's output again; Ctrl-C stops following, not the job. `saturn costs` shows spending per month and person.
 
+When any job ends, its cost is recorded and a summary (who, script, machine, runtime, cost) is posted to the team's Mattermost channel. This happens in AWS, so it works even if your laptop is closed.
+
 ## Datasets (Parquet)
 
 Large datasets are kept as Parquet files in a read-only datasets bucket, laid out for fast filtering. Querying them with DuckDB is much faster than the database: a job pulled all-India CPHS income, consumption and member income in under 2 minutes, where the same queries against MariaDB take hours.
@@ -251,5 +297,4 @@ If something on your laptop already uses port 3306 (a local MySQL, say), connect
 
 - The workspace is shared by everyone. Keep to your own folder; if two people save the same file, the last save wins.
 - Folders you create in the workspace (in Finder, Terminal, R or Julia) show up in jobs, even while empty. This needs the current `saturn`: after `git pull`, run `saturn disconnect` and `saturn connect` once. Scripts are still safest creating their own output folders, e.g. `dir.create("../DOC/IMAGES", recursive = TRUE, showWarnings = FALSE)`.
-- `saturn connect` is macOS-only for now.
 - The database tunnel goes through a small server on AWS, which `saturn connect` starts if it's stopped.
