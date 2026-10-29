@@ -1,6 +1,8 @@
 # saturn-v
 
-**New here?** After [setup](#setup-once), run `saturn docs` to open the user guide in your browser: the same material as this README, with the steps in order and the code in your language. (Before setup, open `docs/guide.html` from your clone in a browser; GitHub only shows its source.)
+[![User guide](https://img.shields.io/badge/user%20guide-open-c2410c)](https://claude.ai/artifact/PGUAxXyocfmX8tQW67K5JF)
+
+**New here? Start with the [user guide](https://claude.ai/artifact/PGUAxXyocfmX8tQW67K5JF)**: the same material as this README, with the steps in order and the code in your language. After setup, `saturn docs` opens a copy from your clone. This README is the full reference.
 
 Run heavy Julia, R and Python jobs on AWS from your laptop, with the same code in both places.
 
