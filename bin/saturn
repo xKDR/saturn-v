@@ -10,6 +10,7 @@
 #   saturn stop <task-id>
 #   saturn list                           # running jobs
 #   saturn costs                          # spending per month and person
+#   saturn docs                           # open the user guide in your browser
 #   saturn cost <task-id>                 # (re)compute one job's cost
 #
 # After `saturn connect`, this laptop has the same environment variables as a job
@@ -645,5 +646,7 @@ stop) aws ecs stop-task --cluster "$(cfg cluster)" --task "${2:?usage: saturn st
 list) aws ecs list-tasks --cluster "$(cfg cluster)" --query 'taskArns[]' --output text | tr '\t' '\n' | sed 's|.*/||' ;;
 cost) record_cost "${2:?usage: saturn cost <task-id>}" ;;
 costs) show_costs ;;
+docs) # the guide in this checkout, so it matches this version of saturn
+  if command -v open >/dev/null; then open "$SATURN_HOME/docs/guide.html"; else xdg-open "$SATURN_HOME/docs/guide.html"; fi ;;
 __tunnel-keeper) tunnel_keeper ;;
 esac
