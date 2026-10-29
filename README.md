@@ -38,7 +38,7 @@ saturn connect
 
 `aws login` opens your browser to sign in; a sign-in lasts up to 12 hours. If it asks for a region, enter `ap-south-1`. `saturn connect` then:
 
-- mounts the shared workspace at `~/aws/workspace` and the satellite data, read-only, at `~/aws/satellite`;
+- mounts the shared workspace at `~/aws/workspace`, and the satellite data and the [datasets](#datasets-parquet), read-only, at `~/aws/satellite` and `~/aws/datasets`;
 - opens a tunnel to the database on `127.0.0.1:3306`;
 - writes the job environment to `~/.config/saturn-v/env` (readable only by you), which new terminals load.
 
@@ -54,6 +54,7 @@ These variables are set in every job, and on your laptop after `saturn connect`:
 | --- | --- | --- |
 | `WORKSPACE` | `/workspace` | `~/aws/workspace` |
 | `SATELLITE` | `/vsis3/<bucket>` (read straight from S3) | `~/aws/satellite` |
+| `DATASETS` | `s3://<bucket>` | `~/aws/datasets` |
 | `DATA_BUCKET`, `AWS_REGION` | the satellite bucket and AWS region | the same |
 | `DB_HOST`, `DB_PORT` | the database | `127.0.0.1` and the tunnel port |
 | `DB_USER`, `DB_PASSWORD` | the shared `aws_jobs` login | the same |
@@ -170,6 +171,66 @@ saturn costs
 ```
 
 `saturn list` shows running jobs. `saturn logs` follows a job's output again; Ctrl-C stops following, not the job. `saturn costs` shows spending per month and person.
+
+## Datasets (Parquet)
+
+Large datasets are kept as Parquet files in a read-only datasets bucket, laid out for fast filtering. Querying them with DuckDB is much faster than the database: a job pulled all-India CPHS income, consumption and member income in under 2 minutes, where the same queries against MariaDB take hours.
+
+| Dataset | What | Partitioned by | Sorted by |
+| --- | --- | --- | --- |
+| `hhd` | CPHS household survey: `hh_consumption_monthly`, `hh_consumption_weekly`, `hh_income_monthly`, `member_income_monthly`, `people_of_india_wave`, `aspirational_wave`, `hh_char` | `YEAR`, `STATE` | `MONTH_SLOT_DATE`, `DISTRICT` |
+
+`DATASETS` is `s3://<bucket>` in a job and `~/aws/datasets` (a read-only mount) on your laptop, so the same code works in both. The tables have the same names and columns as in the database; `MONTH_SLOT_DATE` is a date and `YEAR` a whole number.
+
+R (needs `duckdb`):
+
+```r
+library(DBI)
+con <- dbConnect(duckdb::duckdb())
+root <- file.path(Sys.getenv("DATASETS"), "hhd")
+if (startsWith(root, "s3://")) {
+  dbExecute(con, "INSTALL httpfs")
+  dbExecute(con, "LOAD httpfs")
+  dbExecute(con, sprintf("CREATE SECRET (TYPE s3, KEY_ID '%s', SECRET '%s', SESSION_TOKEN '%s', REGION '%s')",
+    Sys.getenv("AWS_ACCESS_KEY_ID"), Sys.getenv("AWS_SECRET_ACCESS_KEY"), Sys.getenv("AWS_SESSION_TOKEN"), Sys.getenv("AWS_REGION")))
+}
+for (t in c("hh_consumption_monthly", "hh_consumption_weekly", "hh_income_monthly", "member_income_monthly",
+            "people_of_india_wave", "aspirational_wave", "hh_char")) {
+  dbExecute(con, sprintf("CREATE VIEW %s AS SELECT * FROM read_parquet('%s/%s/**/*.parquet', hive_partitioning = true)", t, root, t))
+}
+
+df <- dbGetQuery(con, "SELECT YEAR, AVG(TOT_INC) AS avg_income
+                       FROM hh_income_monthly
+                       WHERE STATE = 'Karnataka' AND YEAR >= 2022 AND RESPONSE_STATUS = 'Accepted'
+                       GROUP BY YEAR ORDER BY YEAR")
+```
+
+Julia (add `DuckDB`, `DBInterface` and `DataFrames` to the `Project.toml`):
+
+```julia
+using DuckDB, DBInterface, DataFrames
+con = DBInterface.connect(DuckDB.DB)
+root = joinpath(ENV["DATASETS"], "hhd")
+if startswith(root, "s3://")
+    DBInterface.execute(con, "INSTALL httpfs")
+    DBInterface.execute(con, "LOAD httpfs")
+    DBInterface.execute(con, "CREATE SECRET (TYPE s3, KEY_ID '$(ENV["AWS_ACCESS_KEY_ID"])', SECRET '$(ENV["AWS_SECRET_ACCESS_KEY"])', " *
+                             "SESSION_TOKEN '$(ENV["AWS_SESSION_TOKEN"])', REGION '$(ENV["AWS_REGION"])')")
+end
+for t in ["hh_consumption_monthly", "hh_consumption_weekly", "hh_income_monthly", "member_income_monthly",
+          "people_of_india_wave", "aspirational_wave", "hh_char"]
+    DBInterface.execute(con, "CREATE VIEW $t AS SELECT * FROM read_parquet('$root/$t/**/*.parquet', hive_partitioning = true)")
+end
+
+df = DBInterface.execute(con, "SELECT * FROM member_income_monthly WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10") |> DataFrame
+```
+
+After that, query the tables with SQL as before, or with dplyr: `tbl(con, "hh_income_monthly") |> filter(STATE == "Karnataka")`.
+
+- **Filter on `YEAR` and `STATE`** whenever you can: those skip whole folders. Filters on `MONTH_SLOT_DATE` and `DISTRICT` are fast too.
+- **Do the heavy work in SQL** (joins, date conversions, sorting), not in R or Julia afterwards: DuckDB uses every core. Pull only the result into R or Julia.
+- **On your laptop,** a query reads only the columns and folders it needs, but all-India pulls of many columns are best run as a job.
+- The `hhd` data is a copy of the database as of 27 Oct 2026.
 
 ## The database
 

@@ -13,7 +13,7 @@
 #   saturn cost <task-id>                 # (re)compute one job's cost
 #
 # After `saturn connect`, this laptop has the same environment variables as a job
-# (WORKSPACE, SATELLITE, DATA_BUCKET, AWS_REGION, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD),
+# (WORKSPACE, SATELLITE, DATASETS, DATA_BUCKET, AWS_REGION, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD),
 # pointing at the local mounts and the database tunnel, so the same code runs in both.
 # They're kept in ~/.config/saturn-v/env; `eval "$(saturn connect)"` also sets them in
 # the current terminal.
@@ -317,6 +317,7 @@ print("{:25} {:6} {:8.2f} {:9.2f}".format("total", len(rows), sum(v[1] for v in 
 
 WORKSPACE_DIR="${WORKSPACE_DIR:-$HOME/aws/workspace}"
 SATELLITE_DIR="${SATELLITE_DIR:-$HOME/aws/satellite}"
+DATASETS_DIR="${DATASETS_DIR:-$HOME/aws/datasets}"
 VFS_FLAGS=(--vfs-cache-mode full --vfs-cache-max-size 20G --dir-cache-time 30s --log-level NOTICE)
 
 is_mounted() { mount | grep -q " on $1 "; }
@@ -354,13 +355,14 @@ mount_workspace() {
   echo "Mounted the workspace at $WORKSPACE_DIR"
 }
 
-mount_satellite() {
-  local bucket=$1
-  if is_mounted "$SATELLITE_DIR"; then echo "$SATELLITE_DIR already mounted"; return; fi
-  mkdir -p "$SATELLITE_DIR"
-  rclone nfsmount "s3:$bucket" "$SATELLITE_DIR" --daemon --volname satellite --read-only "${VFS_FLAGS[@]}" \
-    --log-file "$STATE_DIR/rclone-satellite.log"
-  echo "Mounted the satellite data at $SATELLITE_DIR (read-only)"
+# Read-only mounts: mount_readonly bucket dir name
+mount_readonly() {
+  local bucket=$1 dir=$2 name=$3
+  if is_mounted "$dir"; then echo "$dir already mounted"; return; fi
+  mkdir -p "$dir"
+  rclone nfsmount "s3:$bucket" "$dir" --daemon --volname "$name" --read-only "${VFS_FLAGS[@]}" \
+    --log-file "$STATE_DIR/rclone-$name.log"
+  echo "Mounted $name at $dir (read-only)"
 }
 
 # macOS stores extended attributes as ._* files on network drives; keep them out of SVN.
@@ -379,17 +381,19 @@ global-ignores = ._* .DS_Store *.o *.lo *.la *.al .libs *.so *.so.[0-9]* *.a *.p
 do_mount() {
   [[ $(uname) == Darwin ]] || die "mounting is only set up for macOS so far"
   command -v rclone >/dev/null || die "install rclone first: brew install rclone"
-  local workspace data
+  local workspace data datasets
   workspace=$(cfg workspace_bucket)
   data=$(cfg data_bucket)
+  datasets=$(cfg datasets_bucket)
   use_rclone_credentials
   mount_workspace "$workspace"
-  mount_satellite "$data"
+  mount_readonly "$data" "$SATELLITE_DIR" satellite
+  mount_readonly "$datasets" "$DATASETS_DIR" datasets
   svn_ignore_appledouble
 }
 
 do_unmount() {
-  for dir in "$WORKSPACE_DIR" "$SATELLITE_DIR"; do
+  for dir in "$WORKSPACE_DIR" "$SATELLITE_DIR" "$DATASETS_DIR"; do
     if is_mounted "$dir"; then
       umount "$dir" || die "$dir is busy: cd out of it (and close files there) first"
       echo "Unmounted $dir"
@@ -464,11 +468,12 @@ import json, sys
 s = json.loads(sys.argv[1])
 env = {
     "WORKSPACE": sys.argv[2], "SATELLITE": sys.argv[3], "DATA_BUCKET": sys.argv[4], "AWS_REGION": sys.argv[5],
+    "DATASETS": sys.argv[7],
     "DB_HOST": "127.0.0.1", "DB_PORT": sys.argv[6], "DB_USER": s["username"], "DB_PASSWORD": s["password"],
 }
 print("# Written by `saturn connect`, removed by `saturn disconnect`. Same names as inside a job.")
 for k, v in env.items(): print(f"{k}={v}")' "$secret" "$WORKSPACE_DIR" "$SATELLITE_DIR" "$(cfg data_bucket)" \
-      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" >"$ENV_FILE"
+      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$DATASETS_DIR" >"$ENV_FILE"
   )
   echo "Environment written to $ENV_FILE"
 }
@@ -506,7 +511,7 @@ do_disconnect() {
 }
 
 do_status() {
-  mount | grep -E " on ($WORKSPACE_DIR|$SATELLITE_DIR) " || echo "workspace and satellite: not mounted"
+  mount | grep -E " on ($WORKSPACE_DIR|$SATELLITE_DIR|$DATASETS_DIR) " || echo "workspace, satellite and datasets: not mounted"
   if nc -z 127.0.0.1 "$DB_LOCAL_PORT" 2>/dev/null; then
     echo "database: tunnel open on 127.0.0.1:$DB_LOCAL_PORT"
   else
