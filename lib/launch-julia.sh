@@ -6,6 +6,10 @@ cd "$WORKSPACE/$(dirname "$1")" || exit 1
 # Satellite data, read straight from S3 by GDAL (Rasters, ArchGDAL). On a laptop,
 # `saturn connect` sets SATELLITE to the local mount instead, so code doesn't change.
 export SATELLITE="/vsis3/$DATA_BUCKET"
+
+# saturn's helpers (saturn_db() etc.), sent along with the job by `saturn run`.
+printf '%s' "$SATURN_HELPER" >/tmp/saturn.jl && export SATURN_JL=/tmp/saturn.jl
+unset SATURN_HELPER
 # GDAL needs these for /vsis3/; they come from the task role and last about 6 hours.
 creds=$(julia --startup-file=no -e 'using Downloads
   print(String(take!(Downloads.download("http://169.254.170.2" * ENV["AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"], IOBuffer()))))')

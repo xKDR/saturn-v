@@ -182,48 +182,30 @@ Large datasets are kept as Parquet files in a read-only datasets bucket, laid ou
 
 `DATASETS` is `s3://<bucket>` in a job and `~/aws/datasets` (a read-only mount) on your laptop, so the same code works in both. The tables have the same names and columns as in the database; `MONTH_SLOT_DATE` is a date and `YEAR` a whole number.
 
-R (needs `duckdb`):
+Connect with saturn's helper, then query the tables by name, with SQL or dplyr. Do this once at the top of a script; the same lines work on your laptop and in a job.
+
+R (needs the `duckdb` package):
 
 ```r
-library(DBI)
-con <- dbConnect(duckdb::duckdb())
-root <- file.path(Sys.getenv("DATASETS"), "hhd")
-if (startsWith(root, "s3://")) {
-  dbExecute(con, "INSTALL httpfs")
-  dbExecute(con, "LOAD httpfs")
-  dbExecute(con, sprintf("CREATE SECRET (TYPE s3, KEY_ID '%s', SECRET '%s', SESSION_TOKEN '%s', REGION '%s')",
-    Sys.getenv("AWS_ACCESS_KEY_ID"), Sys.getenv("AWS_SECRET_ACCESS_KEY"), Sys.getenv("AWS_SESSION_TOKEN"), Sys.getenv("AWS_REGION")))
-}
-for (t in c("hh_consumption_monthly", "hh_consumption_weekly", "hh_income_monthly", "member_income_monthly",
-            "people_of_india_wave", "aspirational_wave", "hh_char")) {
-  dbExecute(con, sprintf("CREATE VIEW %s AS SELECT * FROM read_parquet('%s/%s/**/*.parquet', hive_partitioning = true)", t, root, t))
-}
+source(Sys.getenv("SATURN_R"))
+con <- saturn_db("hhd")
 
-df <- dbGetQuery(con, "SELECT YEAR, AVG(TOT_INC) AS avg_income
-                       FROM hh_income_monthly
-                       WHERE STATE = 'Karnataka' AND YEAR >= 2022 AND RESPONSE_STATUS = 'Accepted'
-                       GROUP BY YEAR ORDER BY YEAR")
+df <- DBI::dbGetQuery(con, "SELECT YEAR, AVG(TOT_INC) AS avg_income
+                            FROM hh_income_monthly
+                            WHERE STATE = 'Karnataka' AND YEAR >= 2022 AND RESPONSE_STATUS = 'Accepted'
+                            GROUP BY YEAR ORDER BY YEAR")
 ```
 
 Julia (add `DuckDB`, `DBInterface` and `DataFrames` to the `Project.toml`):
 
 ```julia
-using DuckDB, DBInterface, DataFrames
-con = DBInterface.connect(DuckDB.DB)
-root = joinpath(ENV["DATASETS"], "hhd")
-if startswith(root, "s3://")
-    DBInterface.execute(con, "INSTALL httpfs")
-    DBInterface.execute(con, "LOAD httpfs")
-    DBInterface.execute(con, "CREATE SECRET (TYPE s3, KEY_ID '$(ENV["AWS_ACCESS_KEY_ID"])', SECRET '$(ENV["AWS_SECRET_ACCESS_KEY"])', " *
-                             "SESSION_TOKEN '$(ENV["AWS_SESSION_TOKEN"])', REGION '$(ENV["AWS_REGION"])')")
-end
-for t in ["hh_consumption_monthly", "hh_consumption_weekly", "hh_income_monthly", "member_income_monthly",
-          "people_of_india_wave", "aspirational_wave", "hh_char"]
-    DBInterface.execute(con, "CREATE VIEW $t AS SELECT * FROM read_parquet('$root/$t/**/*.parquet', hive_partitioning = true)")
-end
+include(ENV["SATURN_JL"])
+con = saturn_db("hhd")
 
 df = DBInterface.execute(con, "SELECT * FROM member_income_monthly WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10") |> DataFrame
 ```
+
+`saturn_db()` finds the dataset's tables by itself and makes each one available under its database name. To use several datasets in one query, add them to the same connection: `saturn_db("fld", con = con)`.
 
 After that, query the tables with SQL as before, or with dplyr: `tbl(con, "hh_income_monthly") |> filter(STATE == "Karnataka")`.
 

@@ -259,10 +259,13 @@ run_job() {
   fi
   launcher=$(cat "$SATURN_HOME/lib/launch-$lang.sh")
 
-  overrides=$(ENVS=$(printf '%s\n' ${envs[@]+"${envs[@]}"}) python3 -c '
+  local helper="$SATURN_HOME/lib/saturn.R"
+  [[ $lang == julia ]] && helper="$SATURN_HOME/lib/saturn.jl"
+  overrides=$(ENVS=$(printf '%s\n' ${envs[@]+"${envs[@]}"}) HELPER_FILE=$helper python3 -c '
 import json, os, sys
 container, launcher, args = sys.argv[1], sys.argv[2], sys.argv[3:]
 env = [dict(zip(("name", "value"), l.split("=", 1))) for l in os.environ["ENVS"].splitlines() if l]
+env.append({"name": "SATURN_HELPER", "value": open(os.environ["HELPER_FILE"]).read()})
 o = {"containerOverrides": [{"name": container, "command": ["bash", "-c", launcher, container] + args, "environment": env}]}
 if os.environ.get("CPU"): o["cpu"] = os.environ["CPU"]
 if os.environ.get("MEMORY"): o["memory"] = os.environ["MEMORY"]
@@ -468,12 +471,12 @@ import json, sys
 s = json.loads(sys.argv[1])
 env = {
     "WORKSPACE": sys.argv[2], "SATELLITE": sys.argv[3], "DATA_BUCKET": sys.argv[4], "AWS_REGION": sys.argv[5],
-    "DATASETS": sys.argv[7],
+    "DATASETS": sys.argv[7], "SATURN_R": sys.argv[8] + "/lib/saturn.R", "SATURN_JL": sys.argv[8] + "/lib/saturn.jl",
     "DB_HOST": "127.0.0.1", "DB_PORT": sys.argv[6], "DB_USER": s["username"], "DB_PASSWORD": s["password"],
 }
 print("# Written by `saturn connect`, removed by `saturn disconnect`. Same names as inside a job.")
 for k, v in env.items(): print(f"{k}={v}")' "$secret" "$WORKSPACE_DIR" "$SATELLITE_DIR" "$(cfg data_bucket)" \
-      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$DATASETS_DIR" >"$ENV_FILE"
+      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$DATASETS_DIR" "$SATURN_HOME" >"$ENV_FILE"
   )
   echo "Environment written to $ENV_FILE"
 }
