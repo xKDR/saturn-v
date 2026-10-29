@@ -91,8 +91,13 @@ task_field() { aws ecs describe-tasks --cluster "$(cfg cluster)" --tasks "$1" --
 follow() {
   local task_id=$1 container status code reason
   container=$(task_field "$task_id" 'containers[0].name')
+  if [[ $container == None ]]; then
+    echo "== job $task_id finished some time ago; AWS no longer has its details (its cost is in saturn costs)"
+    return 1
+  fi
   echo "Waiting for job $task_id to start..."
-  until [[ $(task_field "$task_id" lastStatus) =~ ^(RUNNING|DEACTIVATING|STOPPING|DEPROVISIONING|STOPPED)$ ]]; do
+  # "None": AWS has forgotten the task, which it does about an hour after it stops.
+  until [[ $(task_field "$task_id" lastStatus) =~ ^(RUNNING|DEACTIVATING|STOPPING|DEPROVISIONING|STOPPED|None)$ ]]; do
     sleep 5
   done
 
@@ -101,7 +106,7 @@ follow() {
   disown $tail_pid # no "Terminated" notice when we kill it below
   trap 'kill $tail_pid 2>/dev/null; echo; echo "Stopped following; job $task_id is still running (saturn logs $task_id)."; exit 130' INT
 
-  until [[ $(task_field "$task_id" lastStatus) == STOPPED ]]; do
+  until [[ $(task_field "$task_id" lastStatus) =~ ^(STOPPED|None)$ ]]; do
     sleep 15
   done
   sleep 30 # CloudWatch can take a while to deliver the last lines
@@ -109,6 +114,10 @@ follow() {
   trap - INT
 
   code=$(task_field "$task_id" 'containers[0].exitCode')
+  if [[ $code == None ]]; then
+    echo "== job finished some time ago; AWS no longer has its details (its cost is in saturn costs)"
+    return 1
+  fi
   reason=$(task_field "$task_id" stoppedReason)
   echo "== job stopped: exit code $code ($reason)"
   record_cost "$task_id" || echo "(couldn't record the cost; retry with: saturn cost $task_id)"
