@@ -1,5 +1,9 @@
 # saturn-v
 
+[![User guide](https://img.shields.io/badge/user%20guide-open-c2410c)](https://claude.ai/artifact/PGUAxXyocfmX8tQW67K5JF)
+
+**New here? Start with the [user guide](https://claude.ai/artifact/PGUAxXyocfmX8tQW67K5JF)** (ask an admin for access; a copy is in [docs/guide.html](docs/guide.html), which opens in any browser). This README is the full reference.
+
 Run heavy Julia, R and Python jobs on AWS from your laptop, with the same code in both places.
 
 You work on your laptop as usual. When a job needs more than your laptop has, `saturn run` sends it to a machine on AWS Fargate (up to 32 cores and 244 GB of memory), streams its output to your terminal, and records what it cost. Your laptop can sleep or disconnect while the job runs.

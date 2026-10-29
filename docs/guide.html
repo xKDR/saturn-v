@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>saturn-v Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: docs with a sticky contents rail on the left, one reading column, a quick-start
+   panel up top. Cool steel neutrals; one ignition-orange accent for actions and markers. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --sunken: #eceff3;
+  --fg: #151a22;
+  --muted: #5a6473;
+  --line: #d9dee6;
+  --accent: #c2410c;
+  --accent-soft: #fde9dd;
+  --code-bg: #10151d;
+  --code-fg: #e6ebf2;
+  --code-dim: #8b97a8;
+  --ok: #15803d;
+  --warn: #a16207;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Public Sans", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --step--1: 0.875rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.6rem;
+  --step-3: 2.4rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1218; --surface: #151b23; --sunken: #1b222c; --fg: #e4e9f0; --muted: #98a3b3;
+    --line: #2a3340; --accent: #fb8a4c; --accent-soft: #3a2316; --code-bg: #0a0d12;
+    --code-fg: #e6ebf2; --code-dim: #8b97a8; --ok: #4ade80; --warn: #facc15; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1218; --surface: #151b23; --sunken: #1b222c; --fg: #e4e9f0; --muted: #98a3b3;
+  --line: #2a3340; --accent: #fb8a4c; --accent-soft: #3a2316; --code-bg: #0a0d12;
+  --code-fg: #e6ebf2; --code-dim: #8b97a8; --ok: #4ade80; --warn: #facc15; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--body); font-size: var(--step-0); line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 40px 80px; }
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 24px 64px; } }
+
+/* Contents rail */
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font-size: var(--step--1); }
+nav.toc .brand { font-family: var(--display); font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; margin-bottom: 20px; color: var(--fg); text-decoration: none; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+nav.toc a.item { display: block; padding: 5px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; }
+nav.toc a.item:hover { color: var(--fg); background: var(--sunken); }
+nav.toc a.item.active { color: var(--fg); border-left-color: var(--accent); background: var(--sunken); border-radius: 0 6px 6px 0; }
+.lang-pick { margin-top: 24px; display: grid; gap: 8px; }
+.lang-pick .label { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 860px) {
+  nav.toc { position: static; }
+  nav.toc ol { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+
+/* Reading column */
+main { min-width: 0; }
+main > section { padding-block: 28px; border-top: 1px solid var(--line); }
+main > section:first-of-type { border-top: 0; padding-top: 0; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; text-wrap: balance; letter-spacing: -0.015em; }
+h1 { font-size: var(--step-3); margin: 0 0 12px; }
+h2 { font-size: var(--step-2); margin: 0 0 12px; }
+h3 { font-size: var(--step-1); margin: 24px 0 8px; }
+p, li { max-width: 68ch; }
+p { margin: 0 0 12px; }
+ul { padding-left: 1.2em; margin: 0 0 12px; }
+li { margin-bottom: 4px; }
+.lede { font-size: 1.125rem; color: var(--muted); max-width: 60ch; }
+code { font-family: var(--mono); font-size: 0.88em; background: var(--sunken); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.eyebrow { font-size: 0.75rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); font-weight: 600; margin-bottom: 6px; }
+
+/* Code blocks */
+.code { position: relative; margin: 8px 0 16px; }
+.code pre { margin: 0; background: var(--code-bg); color: var(--code-fg); font-family: var(--mono); font-size: 0.85rem; line-height: 1.55; padding: 14px 16px; border-radius: 8px; overflow-x: auto; }
+.code pre .c { color: var(--code-dim); }
+.code pre .p { color: var(--code-dim); user-select: none; }
+.copy { position: absolute; top: 8px; right: 8px; font: 600 0.72rem var(--body); color: var(--code-dim); background: transparent; border: 1px solid #2c3644; border-radius: 5px; padding: 3px 8px; cursor: pointer; }
+.copy:hover { color: var(--code-fg); border-color: var(--code-dim); }
+
+/* Tabs (language / OS) */
+.tabs { margin: 8px 0 16px; }
+.tablist { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: -1px; }
+.tablist button, .seg button {
+  font: 600 0.8rem var(--body); color: var(--muted); background: transparent; border: 1px solid transparent;
+  padding: 6px 12px; border-radius: 6px 6px 0 0; cursor: pointer;
+}
+.tablist button[aria-selected="true"] { color: var(--fg); background: var(--surface); border-color: var(--line); border-bottom-color: var(--surface); }
+.tabpanel { background: var(--surface); border: 1px solid var(--line); border-radius: 0 8px 8px 8px; padding: 14px 16px 2px; }
+.tabpanel .code:first-child { margin-top: 0; }
+.seg { display: inline-flex; background: var(--sunken); border-radius: 8px; padding: 3px; gap: 2px; }
+.seg button { border-radius: 6px; padding: 5px 12px; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+
+/* Quick start */
+.quick { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 20px 8px; margin-top: 24px; }
+.quick ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.quick li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; max-width: none; }
+.quick .n { font-family: var(--display); font-weight: 700; color: var(--accent); font-size: 1.1rem; line-height: 2.1; }
+.quick li p { margin: 6px 0 4px; }
+.quick .code { margin: 4px 0 12px; }
+
+/* How it fits */
+.fit { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 16px; align-items: stretch; margin: 16px 0 8px; }
+.fit .box { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.fit .box h4 { font-family: var(--display); margin: 0 0 8px; font-size: 1rem; }
+.fit .box ul { list-style: none; padding: 0; margin: 0; font-size: var(--step--1); }
+.fit .box li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-top: 1px dashed var(--line); }
+.fit .box li:first-child { border-top: 0; }
+.fit .box li span:last-child { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+.fit .arrow { align-self: center; text-align: center; font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+.fit .arrow b { display: block; font-size: 1.4rem; color: var(--accent); font-weight: 400; }
+@media (max-width: 640px) { .fit { grid-template-columns: minmax(0, 1fr); } .fit .arrow b { transform: rotate(90deg); } }
+
+/* Tables */
+.table { overflow-x: auto; margin: 8px 0 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
+th, td { text-align: left; padding: 9px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+thead th { border-top: 0; font-size: 0.72rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--sunken); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Notes */
+.note { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 12px 14px; margin: 12px 0 16px; font-size: 0.95rem; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+.note .tag { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; align-self: start; margin-top: 2px; }
+.note.tip .tag { background: var(--accent-soft); color: var(--accent); }
+.note.cost .tag { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.note.warn .tag { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.note p:last-child { margin-bottom: 0; }
+
+/* Troubleshooting */
+details { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-bottom: 8px; }
+summary { cursor: pointer; padding: 11px 14px; font-weight: 600; list-style: none; display: flex; gap: 10px; align-items: baseline; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "+"; font-family: var(--mono); color: var(--accent); width: 1ch; }
+details[open] summary::before { content: "−"; }
+details > div { padding: 0 14px 4px 34px; }
+
+/* Cheat sheet */
+.cheat { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.cheat div { padding: 10px 14px; border-top: 1px solid var(--line); min-width: 0; }
+.cheat code { background: none; padding: 0; font-weight: 600; color: var(--fg); display: block; }
+.cheat span { font-size: var(--step--1); color: var(--muted); }
+footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <a class="brand" href="#start">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><ellipse cx="12" cy="12" rx="11" ry="3.6" fill="none" stroke="var(--accent)" stroke-width="1.8" transform="rotate(-20 12 12)"/></svg>
+      saturn-v
+    </a>
+    <ol>
+      <li><a class="item" href="#start">Quick start</a></li>
+      <li><a class="item" href="#how">How it fits together</a></li>
+      <li><a class="item" href="#setup">Setup (once)</a></li>
+      <li><a class="item" href="#session">Each session</a></li>
+      <li><a class="item" href="#workspace">The workspace</a></li>
+      <li><a class="item" href="#same-code">Same code everywhere</a></li>
+      <li><a class="item" href="#run">Running a job</a></li>
+      <li><a class="item" href="#packages">Packages</a></li>
+      <li><a class="item" href="#datasets">Datasets (Parquet)</a></li>
+      <li><a class="item" href="#database">The database</a></li>
+      <li><a class="item" href="#jobs">Jobs and costs</a></li>
+      <li><a class="item" href="#trouble">When something's off</a></li>
+      <li><a class="item" href="#cheatsheet">Cheat sheet</a></li>
+    </ol>
+    <div class="lang-pick">
+      <span class="label">Show code in</span>
+      <div class="seg" role="group" aria-label="Language for code examples">
+        <button type="button" data-lang="r" aria-pressed="true">R</button>
+        <button type="button" data-lang="julia" aria-pressed="false">Julia</button>
+        <button type="button" data-lang="python" aria-pressed="false">Python</button>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <section id="start">
+      <div class="eyebrow">xKDR research computing</div>
+      <h1>Run heavy jobs on AWS from your laptop</h1>
+      <p class="lede">Work on your laptop as usual. When a script needs more than your laptop has, <code>saturn run</code> sends it to a machine with up to 32 cores and 244 GB of memory, streams the output back to your terminal, and records what it cost. The same script runs in both places, in R, Julia or Python.</p>
+
+      <div class="quick">
+        <ol>
+          <li><span class="n">1</span><div><p><b>Get an account.</b> Ask an admin to create your AWS user and add it to <code>saturn-v-users</code>. At first sign-in, set a password and add MFA.</p></div></li>
+          <li><span class="n">2</span><div><p><b>Install once</b> (<a href="#setup">Mac or Linux steps</a>), then each session:</p>
+            <div class="code"><pre><span class="p">$ </span>aws login --profile aws-server
+<span class="p">$ </span>saturn connect</pre></div></div></li>
+          <li><span class="n">3</span><div><p><b>Put your script in your folder</b> in the shared workspace, <code>~/aws/workspace/&lt;you&gt;/</code>, and try it locally.</p></div></li>
+          <li><span class="n">4</span><div><p><b>Run it on AWS.</b> The path is relative to the workspace.</p>
+            <div class="code"><pre><span class="p">$ </span>saturn run &lt;you&gt;/project/analysis.R</pre></div></div></li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="how">
+      <h2>How it fits together</h2>
+      <p>After <code>saturn connect</code>, your laptop sees the same files, data and database a job does, under the same names. That's why a script you try locally runs unchanged on AWS.</p>
+      <div class="fit" role="img" aria-label="Your laptop and an AWS job see the same workspace, satellite data, datasets and database.">
+        <div class="box">
+          <h4>Your laptop</h4>
+          <ul>
+            <li><span>Shared workspace</span><span>~/aws/workspace</span></li>
+            <li><span>Satellite data (read-only)</span><span>~/aws/satellite</span></li>
+            <li><span>Parquet datasets (read-only)</span><span>~/aws/datasets</span></li>
+            <li><span>Database</span><span>127.0.0.1:3306</span></li>
+          </ul>
+        </div>
+        <div class="arrow"><b>⇄</b>same names</div>
+        <div class="box">
+          <h4>A job on AWS (Mumbai)</h4>
+          <ul>
+            <li><span>Shared workspace</span><span>/workspace</span></li>
+            <li><span>Satellite data</span><span>/vsis3/…</span></li>
+            <li><span>Parquet datasets</span><span>s3://…</span></li>
+            <li><span>Database</span><span>mayin-data</span></li>
+          </ul>
+        </div>
+      </div>
+      <p>Your code never uses these paths directly. It reads them from environment variables (<a href="#same-code">see below</a>), which point to the right place on each side.</p>
+    </section>
+
+    <section id="setup">
+      <h2>Setup (once)</h2>
+      <p>Install the AWS command line, rclone (for the mounts) and the Session Manager plugin (for the database tunnel), then clone saturn-v.</p>
+      <div class="tabs" data-group="os">
+        <div class="tablist" role="tablist" aria-label="Operating system">
+          <button type="button" role="tab" data-key="mac" aria-selected="true">Mac</button>
+          <button type="button" role="tab" data-key="linux" aria-selected="false">Linux (Debian, Ubuntu)</button>
+        </div>
+        <div class="tabpanel" data-key="mac" role="tabpanel">
+          <div class="code"><pre><span class="c"># Homebrew, if you don't have it</span>
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install awscli rclone
+brew install --cask session-manager-plugin
+
+git clone git@github.com:xKDR/saturn-v.git
+cd saturn-v
+echo "export PATH=\"$PWD/bin:\$PATH\"" &gt;&gt; ~/.zshrc
+echo '[ -f ~/.config/saturn-v/env ] &amp;&amp; set -a &amp;&amp; . ~/.config/saturn-v/env &amp;&amp; set +a' &gt;&gt; ~/.zshrc
+aws configure set region ap-south-1 --profile aws-server</pre></div>
+          <p>Open a new terminal afterwards.</p>
+        </div>
+        <div class="tabpanel" data-key="linux" role="tabpanel" hidden>
+          <div class="code"><pre>sudo apt install -y git unzip curl python3 perl fuse3
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
+unzip -q /tmp/awscliv2.zip -d /tmp &amp;&amp; sudo /tmp/aws/install
+curl -fsSL https://rclone.org/install.sh | sudo bash
+curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
+sudo dpkg -i /tmp/smp.deb
+
+git clone git@github.com:xKDR/saturn-v.git
+cd saturn-v
+echo "export PATH=\"$PWD/bin:\$PATH\"" &gt;&gt; ~/.bashrc
+echo '[ -f ~/.config/saturn-v/env ] &amp;&amp; set -a &amp;&amp; . ~/.config/saturn-v/env &amp;&amp; set +a' &gt;&gt; ~/.bashrc
+aws configure set region ap-south-1 --profile aws-server</pre></div>
+          <ul>
+            <li><b>Fedora:</b> use <code>dnf</code>, and the plugin's <code>linux_64bit/session-manager-plugin.rpm</code>. On ARM, use <code>ubuntu_arm64</code> or <code>linux_arm64</code>.</li>
+            <li><b>Zsh:</b> use <code>~/.zshrc</code> instead of <code>~/.bashrc</code>.</li>
+            <li><b>A server without a browser:</b> sign in with <code>aws login --profile aws-server --remote</code>, which prints a link to open on any device.</li>
+          </ul>
+        </div>
+      </div>
+      <p>The two <code>echo</code> lines put <code>saturn</code> on your path and load the job's environment variables into every new terminal while you're connected. The last line saves the AWS region (Mumbai).</p>
+      <p>To update saturn later: <code>git -C ~/saturn-v pull</code> (or wherever you cloned it), then <code>saturn disconnect</code> and <code>saturn connect</code>.</p>
+    </section>
+
+    <section id="session">
+      <h2>Each session</h2>
+      <div class="code"><pre><span class="p">$ </span>aws login --profile aws-server     <span class="c"># opens your browser; lasts up to 12 hours</span>
+<span class="p">$ </span>saturn connect</pre></div>
+      <p><code>saturn connect</code> does five things:</p>
+      <ul>
+        <li>mounts the shared workspace at <code>~/aws/workspace</code>, and the satellite data and datasets (read-only) at <code>~/aws/satellite</code> and <code>~/aws/datasets</code>;</li>
+        <li>opens a tunnel to the database on <code>127.0.0.1:3306</code>, and reopens it in the background if it drops;</li>
+        <li>creates your own folder, <code>~/aws/workspace/&lt;your user name&gt;</code>;</li>
+        <li>writes the job's environment variables to <code>~/.config/saturn-v/env</code>, which new terminals load;</li>
+        <li>the first time, creates a mount key on your account that can only use the three buckets.</li>
+      </ul>
+      <p>Because of that key, the mounts keep working after your 12-hour sign-in expires. Running jobs and reopening the tunnel still need a current sign-in; run <code>aws login --profile aws-server</code> again when asked.</p>
+      <p><code>saturn status</code> shows what's connected. <code>saturn disconnect</code> undoes it all. In the terminal you're already in, <code>eval "$(saturn connect)"</code> also sets the variables there.</p>
+    </section>
+
+    <section id="workspace">
+      <h2>The workspace</h2>
+      <p>Everyone shares one workspace, so keep to this layout:</p>
+      <div class="table"><table>
+        <thead><tr><th>Folder</th><th>For</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;your user name&gt;/</code></td><td>Your own work. <code>MY_WORKSPACE</code> points here, on your laptop and in your jobs.</td></tr>
+          <tr><td><code>shared/&lt;project&gt;/</code></td><td>Work several people use. Agree on the folder name with them.</td></tr>
+          <tr><td><code>db/</code>, <code>costs/</code>, <code>.julia/</code>, <code>.R/</code></td><td>Used by saturn itself. Leave them alone.</td></tr>
+        </tbody>
+      </table></div>
+      <p>If two people save the same file, the last save wins. Anything a job writes appears on your laptop within a minute or two.</p>
+    </section>
+
+    <section id="same-code">
+      <h2>The same code on your laptop and on AWS</h2>
+      <p>These variables are set in every job, and on your laptop after <code>saturn connect</code>. Build paths and connections from them, never from fixed paths.</p>
+      <div class="table"><table>
+        <thead><tr><th>Variable</th><th>In a job</th><th>On your laptop</th></tr></thead>
+        <tbody>
+          <tr><td><code>WORKSPACE</code></td><td><code>/workspace</code></td><td><code>~/aws/workspace</code></td></tr>
+          <tr><td><code>MY_WORKSPACE</code></td><td><code>/workspace/&lt;you&gt;</code></td><td><code>~/aws/workspace/&lt;you&gt;</code></td></tr>
+          <tr><td><code>SATELLITE</code></td><td><code>/vsis3/&lt;bucket&gt;</code>, read straight from S3</td><td><code>~/aws/satellite</code></td></tr>
+          <tr><td><code>DATASETS</code></td><td><code>s3://&lt;bucket&gt;</code></td><td><code>~/aws/datasets</code></td></tr>
+          <tr><td><code>DB_HOST</code>, <code>DB_PORT</code></td><td>the database</td><td><code>127.0.0.1</code> and the tunnel port</td></tr>
+          <tr><td><code>DB_USER</code>, <code>DB_PASSWORD</code></td><td colspan="2">the shared, read-only <code>aws_jobs</code> login</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Reading a satellite file</h3>
+      <div class="tabs" data-group="lang">
+        <div class="tablist" role="tablist" aria-label="Language">
+          <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
+          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia</button>
+          <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
+        </div>
+        <div class="tabpanel" data-key="r" role="tabpanel">
+          <div class="code"><pre>f &lt;- file.path(Sys.getenv("SATELLITE"), "ntl/sl/rad/&lt;file&gt;.tif")
+r &lt;- terra::rast(f)
+
+out &lt;- file.path(Sys.getenv("MY_WORKSPACE"), "project", "results.rds")</pre></div>
+        </div>
+        <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
+          <div class="code"><pre>using Rasters, ArchGDAL
+r = Raster(joinpath(ENV["SATELLITE"], "ntl", "sl", "rad", "&lt;file&gt;.tif"); lazy=true)
+
+out = joinpath(ENV["MY_WORKSPACE"], "project", "results.csv")</pre></div>
+        </div>
+        <div class="tabpanel" data-key="python" role="tabpanel" hidden>
+          <div class="code"><pre>import os, rasterio
+r = rasterio.open(os.path.join(os.environ["SATELLITE"], "ntl/sl/rad/&lt;file&gt;.tif"))
+
+out = os.path.join(os.environ["MY_WORKSPACE"], "project", "results.parquet")</pre></div>
+        </div>
+      </div>
+      <div class="note cost"><span class="tag">Cost</span><p>Reading satellite files on your laptop downloads them, at about $0.11 per GB. Try things on a few files or a small area locally, and do the heavy reading in a job, where it's free.</p></div>
+      <div class="note tip"><span class="tag">RStudio</span><p>Apps started from the Dock don't read your terminal's setup. In R, run <code>readRenviron("~/.config/saturn-v/env")</code> first.</p></div>
+    </section>
+
+    <section id="run">
+      <h2>Running a job</h2>
+      <div class="code"><pre><span class="p">$ </span>saturn run &lt;you&gt;/project/main.jl
+<span class="p">$ </span>saturn run &lt;you&gt;/project/analysis.R
+<span class="p">$ </span>saturn run &lt;you&gt;/project/analysis.py
+<span class="p">$ </span>CPU=16384 MEMORY=65536 saturn run &lt;you&gt;/project/main.jl     <span class="c"># bigger machine</span>
+<span class="p">$ </span>saturn run -e START=2014-01 &lt;you&gt;/project/main.jl           <span class="c"># extra variable for the job</span>
+<span class="p">$ </span>SPOT=1 saturn run &lt;you&gt;/project/main.jl                     <span class="c"># ~70% cheaper, may be interrupted</span></pre></div>
+      <p>The job starts in about a minute and its output streams to your terminal. Press Ctrl-C to stop watching: the job keeps running, and your laptop can sleep or disconnect.</p>
+      <div class="table"><table>
+        <thead><tr><th>Machine</th><th>Settings</th><th>About per hour</th></tr></thead>
+        <tbody>
+          <tr><td>Default</td><td>4 cores, 16 GB</td><td class="num">$0.25</td></tr>
+          <tr><td>Large</td><td><code>CPU=16384 MEMORY=122880</code> (16 cores, 120 GB)</td><td class="num">$1.25</td></tr>
+          <tr><td>Largest</td><td><code>CPU=32768 MEMORY=249856</code> (32 cores, 244 GB)</td><td class="num">$2.50</td></tr>
+        </tbody>
+      </table></div>
+      <p>You pay per second, only while a job runs, with a one-minute minimum. A quick check job costs about half a cent.</p>
+      <p>The <a href="https://github.com/xKDR/saturn-v/tree/main/examples">examples folder</a> has a first script in each language. Copy one into your folder and run it.</p>
+    </section>
+
+    <section id="packages">
+      <h2>Packages</h2>
+      <p>A job installs the packages your project lists, then runs your script.</p>
+      <div class="tabs" data-group="lang">
+        <div class="tablist" role="tablist" aria-label="Language">
+          <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
+          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia</button>
+          <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
+        </div>
+        <div class="tabpanel" data-key="r" role="tabpanel">
+          <p>The R image already has terra, sf, GDAL, the tidyverse and more. For anything else, or exact versions, use <a href="https://rstudio.github.io/renv/">renv</a>. It records your packages in <code>renv.lock</code>, which the job installs from.</p>
+          <div class="code"><pre><span class="c"># once, in the project folder</span>
+setwd("~/aws/workspace/&lt;you&gt;/project")
+renv::init()
+
+<span class="c"># adding a package</span>
+install.packages("RMariaDB")
+renv::snapshot()     <span class="c"># writes it to renv.lock; without this the job won't have it</span>
+
+renv::status()       <span class="c"># anything used but not recorded?</span></pre></div>
+          <p>The job uses the same R version as your <code>renv.lock</code> (4.5 and 4.6 are available; without a lock file, the newest). Choose one with <code>R_VERSION=4.6 saturn run …</code>. Packages are cached, so only the first run installs them.</p>
+        </div>
+        <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
+          <p>Packages come from the <code>Project.toml</code> (and <code>Manifest.toml</code>) next to the script or in a folder above it. Add them on your laptop as usual:</p>
+          <div class="code"><pre>julia --project=.
+julia&gt; ]add DuckDB DataFrames</pre></div>
+          <p>Commit both files to the project folder. Packages are cached in the workspace, so only the first run installs them. Julia uses every core the job has.</p>
+        </div>
+        <div class="tabpanel" data-key="python" role="tabpanel" hidden>
+          <p>Python jobs run with <a href="https://docs.astral.sh/uv/">uv</a>, which installs your packages (and the Python version you ask for; 3.13 otherwise) in a few seconds. List them in one of three ways:</p>
+          <ul>
+            <li>a <b><code>pyproject.toml</code></b> (and <code>uv.lock</code>) in the script's folder or above: <code>uv init</code>, <code>uv add pandas</code>;</li>
+            <li>a <b><code>requirements.txt</code></b> next to the script;</li>
+            <li>a <b>header in the script</b>, for single files (<code>uv add --script analysis.py pandas</code> writes it):</li>
+          </ul>
+          <div class="code"><pre># /// script
+# dependencies = ["pandas", "duckdb", "rasterio"]
+# ///</pre></div>
+          <p>On your laptop, <code>uv run analysis.py</code> runs it the same way (<code>brew install uv</code>). rasterio and geopandas come with their own GDAL.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="datasets">
+      <h2>Datasets (Parquet)</h2>
+      <p>Large datasets are kept as Parquet files, laid out for fast filtering. DuckDB reads them far faster than the database: a job pulled all-India CPHS income, consumption and member income in under two minutes, where the same queries against MariaDB take hours.</p>
+      <div class="table"><table>
+        <thead><tr><th>Dataset</th><th>Tables</th><th>Split by</th></tr></thead>
+        <tbody>
+          <tr><td><code>hhd</code></td><td>CPHS: <code>hh_income_monthly</code>, <code>hh_consumption_monthly</code>, <code>hh_consumption_weekly</code>, <code>member_income_monthly</code>, <code>people_of_india_wave</code>, <code>aspirational_wave</code>, <code>hh_char</code></td><td><code>YEAR</code>, <code>STATE</code></td></tr>
+        </tbody>
+      </table></div>
+      <p>saturn's helper connects you with one line and makes every table available under its database name. The same lines work on your laptop and in a job.</p>
+      <div class="tabs" data-group="lang">
+        <div class="tablist" role="tablist" aria-label="Language">
+          <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
+          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia</button>
+          <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
+        </div>
+        <div class="tabpanel" data-key="r" role="tabpanel">
+          <div class="code"><pre><span class="c"># needs the duckdb package</span>
+source(Sys.getenv("SATURN_R"))
+con &lt;- saturn_db("hhd")
+
+df &lt;- DBI::dbGetQuery(con, "
+  SELECT YEAR, AVG(TOT_INC) AS avg_income
+  FROM hh_income_monthly
+  WHERE STATE = 'Karnataka' AND YEAR &gt;= 2022 AND RESPONSE_STATUS = 'Accepted'
+  GROUP BY YEAR ORDER BY YEAR")
+
+<span class="c"># or with dplyr</span>
+tbl(con, "hh_income_monthly") |&gt; filter(STATE == "Karnataka")</pre></div>
+        </div>
+        <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
+          <div class="code"><pre><span class="c"># add DuckDB, DBInterface and DataFrames to the Project.toml</span>
+include(ENV["SATURN_JL"])
+con = saturn_db("hhd")
+
+df = DBInterface.execute(con, """
+  SELECT * FROM member_income_monthly
+  WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10""") |&gt; DataFrame</pre></div>
+        </div>
+        <div class="tabpanel" data-key="python" role="tabpanel" hidden>
+          <div class="code"><pre><span class="c"># add duckdb (and pandas for .df()) to the script's packages</span>
+import os
+exec(open(os.environ["SATURN_PY"]).read())
+con = saturn_db("hhd")
+
+df = con.sql("""
+  SELECT * FROM member_income_monthly
+  WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10""").df()</pre></div>
+        </div>
+      </div>
+      <ul>
+        <li><b>Filter on <code>YEAR</code> and <code>STATE</code></b> whenever you can: those skip whole folders. <code>MONTH_SLOT_DATE</code> and <code>DISTRICT</code> are fast too.</li>
+        <li><b>Do the heavy work in SQL</b> (joins, date conversions, sorting). DuckDB uses every core; pull only the result into your language.</li>
+        <li><b>All-India pulls of many columns</b> belong in a job, not on your laptop.</li>
+        <li>To query several datasets together, add them to one connection: <code>saturn_db("fld", con = con)</code>.</li>
+        <li>The <code>hhd</code> data is a copy of the database as of 27 Oct 2026.</li>
+      </ul>
+    </section>
+
+    <section id="database">
+      <h2>The database</h2>
+      <p>Jobs and laptops share one login, <code>aws_jobs</code>, which can only <b>read</b> the <code>mayin-data</code> MariaDB databases (<code>fld</code>, <code>hhd</code>, <code>maps</code>, …). Save results as files in the workspace. The password reaches your code through <code>DB_PASSWORD</code>, so it never appears in a script.</p>
+      <div class="tabs" data-group="lang">
+        <div class="tablist" role="tablist" aria-label="Language">
+          <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
+          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia</button>
+          <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
+        </div>
+        <div class="tabpanel" data-key="r" role="tabpanel">
+          <div class="code"><pre>con &lt;- DBI::dbConnect(RMariaDB::MariaDB(),
+  host = Sys.getenv("DB_HOST"), port = as.integer(Sys.getenv("DB_PORT")),
+  user = Sys.getenv("DB_USER"), password = Sys.getenv("DB_PASSWORD"),
+  dbname = "fld", client.flag = RMariaDB::CLIENT_SSL)
+df &lt;- DBI::dbGetQuery(con, "SELECT * FROM some_table LIMIT 10")
+DBI::dbDisconnect(con)</pre></div>
+        </div>
+        <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
+          <div class="code"><pre>using MySQL, DBInterface, DataFrames
+con = DBInterface.connect(MySQL.Connection, ENV["DB_HOST"], ENV["DB_USER"], ENV["DB_PASSWORD"];
+                          port=parse(Int, ENV["DB_PORT"]), db="fld", ssl_mode=:required)
+df = DBInterface.execute(con, "SELECT * FROM some_table LIMIT 10") |&gt; DataFrame
+DBInterface.close!(con)</pre></div>
+        </div>
+        <div class="tabpanel" data-key="python" role="tabpanel" hidden>
+          <div class="code"><pre><span class="c"># add pymysql and pandas to the script's packages</span>
+import os, pymysql, pandas as pd
+con = pymysql.connect(host=os.environ["DB_HOST"], port=int(os.environ["DB_PORT"]),
+                      user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"],
+                      database="fld", ssl={"ssl": {}})
+with con.cursor() as cur:
+    cur.execute("SELECT * FROM some_table LIMIT 10")
+    df = pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
+con.close()</pre></div>
+        </div>
+      </div>
+      <p>The database only accepts encrypted connections, which is what the SSL options above ask for. Other clients (DBeaver, TablePlus, <code>mysql</code>) work too: host <code>127.0.0.1</code>, port <code>3306</code>, user and password from <code>~/.config/saturn-v/env</code>.</p>
+      <div class="note tip"><span class="tag">Faster</span><p>For CPHS household data, the <a href="#datasets">Parquet datasets</a> are much faster than the database.</p></div>
+    </section>
+
+    <section id="jobs">
+      <h2>Jobs and costs</h2>
+      <div class="code"><pre><span class="p">$ </span>saturn list                 <span class="c"># running jobs</span>
+<span class="p">$ </span>saturn logs &lt;task-id&gt;       <span class="c"># follow a job's output again</span>
+<span class="p">$ </span>saturn stop &lt;task-id&gt;
+<span class="p">$ </span>saturn costs                <span class="c"># spending per month and person</span></pre></div>
+      <p>When a job ends, a notice goes to the team's Mattermost channel with who ran it, the script, the machine, the runtime and the cost. It comes from AWS, so it arrives even if your laptop is closed. Every Monday at 9:00 a summary of the past week follows, with jobs, failures, hours and spend per person.</p>
+    </section>
+
+    <section id="trouble">
+      <h2>When something's off</h2>
+      <details><summary><code>echo $DB_HOST</code> prints nothing</summary><div><p>This terminal was opened before <code>saturn connect</code>. Open a new one, or run <code>eval "$(saturn connect)"</code>. In RStudio, run <code>readRenviron("~/.config/saturn-v/env")</code>.</p></div></details>
+      <details><summary>The job doesn't have a package I installed</summary><div><p>R: run <code>renv::snapshot()</code> after <code>install.packages()</code>. Julia: add it with <code>]add</code> in the project, so it's in <code>Project.toml</code>. Python: add it to the header, <code>pyproject.toml</code> or <code>requirements.txt</code>.</p></div></details>
+      <details><summary>"R 4.x is not available on AWS"</summary><div><p>Your <code>renv.lock</code> was made with an R version AWS doesn't offer. Upgrade R on your laptop, then run <code>renv::update()</code> and <code>renv::snapshot()</code>.</p></div></details>
+      <details><summary>"Connections using insecure transport are prohibited"</summary><div><p>Add the SSL option: <code>client.flag = RMariaDB::CLIENT_SSL</code> in R, <code>ssl_mode=:required</code> in Julia.</p></div></details>
+      <details><summary>Port 3306 is already in use</summary><div><p>Something on your laptop (a local MySQL, say) uses it. Connect with <code>DB_LOCAL_PORT=13306 saturn connect</code>; <code>DB_PORT</code> then says 13306.</p></div></details>
+      <details><summary>A job's output file isn't on my laptop yet</summary><div><p>Files written by a job take a minute or two to appear in <code>~/aws/workspace</code>.</p></div></details>
+      <details><summary>"you already have two access keys"</summary><div><p>AWS allows two keys per person, so saturn's mount key works on two computers. Delete one you no longer use under Security credentials in the AWS console, then run <code>saturn connect</code> again.</p></div></details>
+      <details><summary>saturn asks me to sign in</summary><div><p>Your 12-hour sign-in expired. Run <code>aws login --profile aws-server</code>. The mounts keep working meanwhile.</p></div></details>
+    </section>
+
+    <section id="cheatsheet">
+      <h2>Cheat sheet</h2>
+      <div class="cheat">
+        <div><code>aws login --profile aws-server</code><span>Sign in (12 hours)</span></div>
+        <div><code>saturn connect</code><span>Mounts, tunnel, environment</span></div>
+        <div><code>saturn status</code><span>What's connected</span></div>
+        <div><code>saturn disconnect</code><span>Undo connect</span></div>
+        <div><code>saturn run &lt;path&gt;</code><span>Run a .R, .jl or .py on AWS</span></div>
+        <div><code>CPU=… MEMORY=… SPOT=1</code><span>Machine size, cheaper Spot</span></div>
+        <div><code>saturn list</code><span>Running jobs</span></div>
+        <div><code>saturn logs &lt;id&gt;</code><span>Follow a job again</span></div>
+        <div><code>saturn stop &lt;id&gt;</code><span>Stop a job</span></div>
+        <div><code>saturn costs</code><span>Spending per month and person</span></div>
+      </div>
+      <footer>The full reference is the <a href="https://github.com/xKDR/saturn-v">saturn-v README</a>. Questions go to the team's Mattermost channel.</footer>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  // Language and OS tabs: picking one switches every tab group of that kind.
+  var store = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  function select(group, key) {
+    document.querySelectorAll('.tabs[data-group="' + group + '"]').forEach(function (t) {
+      t.querySelectorAll('[role="tab"]').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.key === key)); });
+      t.querySelectorAll('[role="tabpanel"]').forEach(function (p) { p.hidden = p.dataset.key !== key; });
+    });
+    if (group === 'lang') {
+      document.querySelectorAll('.seg [data-lang]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.lang === key)); });
+    }
+    store.set('saturn-docs-' + group, key);
+  }
+  document.querySelectorAll('.tabs').forEach(function (t) {
+    t.querySelectorAll('[role="tab"]').forEach(function (b) {
+      b.addEventListener('click', function () { select(t.dataset.group, b.dataset.key); });
+    });
+  });
+  document.querySelectorAll('.seg [data-lang]').forEach(function (b) {
+    b.addEventListener('click', function () { select('lang', b.dataset.lang); });
+  });
+  var lang = store.get('saturn-docs-lang'); if (lang) select('lang', lang);
+  var os = store.get('saturn-docs-os') || (/Linux/.test(navigator.platform) && !/Android/.test(navigator.userAgent) ? 'linux' : null);
+  if (os) select('os', os);
+
+  // Copy buttons on code blocks (without the "$ " prompts).
+  document.querySelectorAll('.code').forEach(function (block) {
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'copy'; btn.textContent = 'Copy';
+    btn.addEventListener('click', function () {
+      var pre = block.querySelector('pre').cloneNode(true);
+      pre.querySelectorAll('.p').forEach(function (s) { s.remove(); });
+      var text = pre.textContent;
+      var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { selectText(block); });
+      } else { selectText(block); }
+    });
+    block.appendChild(btn);
+  });
+  function selectText(block) {
+    var r = document.createRange(); r.selectNodeContents(block.querySelector('pre'));
+    var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  }
+
+  // Highlight the section being read in the contents rail.
+  var links = {};
+  document.querySelectorAll('nav.toc a.item').forEach(function (a) { links[a.getAttribute('href').slice(1)] = a; });
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          Object.keys(links).forEach(function (k) { links[k].classList.toggle('active', k === e.target.id); });
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    document.querySelectorAll('main > section').forEach(function (s) { io.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>
