@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# saturn: run heavy Julia and R jobs on AWS Fargate from your laptop.
+# saturn: run heavy Julia, R and Python jobs on AWS Fargate from your laptop.
 #
 # Usage:
 #   saturn connect                        # workspace, satellite data and database on this laptop
 #   saturn disconnect
 #   saturn status
-#   saturn run [-e NAME=VALUE ...] path/to/script.jl|.R [args...]
+#   saturn run [-e NAME=VALUE ...] path/to/script.jl|.R|.py [args...]
 #   saturn logs <task-id>                 # follow a job's output again
 #   saturn stop <task-id>
 #   saturn list                           # running jobs
@@ -20,7 +20,9 @@
 #
 # The script path is relative to the workspace (~/aws/workspace on your laptop,
 # /workspace in the job). Julia: packages come from the nearest Project.toml. R: from
-# renv.lock in the script's folder, if there is one. Both are cached between runs.
+# renv.lock in the script's folder, if there is one. Python: from the nearest
+# pyproject.toml, a requirements.txt next to the script, or the script's own header
+# (installed with uv, afresh in each job). Julia and R packages are cached between runs.
 #
 # -e sets an environment variable inside the job (repeatable).
 # Size and options (env vars): CPU=16384 MEMORY=65536 (default 4 vCPU / 16 GB; up to
@@ -78,7 +80,8 @@ language_of() {
   case "$1" in
   *.jl) echo julia ;;
   *.R | *.r) echo r ;;
-  *) die "don't know how to run $1 (expected .jl or .R)" ;;
+  *.py) echo python ;;
+  *) die "don't know how to run $1 (expected .jl, .R or .py)" ;;
   esac
 }
 
@@ -226,7 +229,7 @@ run_job() {
     envs+=("$2")
     shift 2
   done
-  [[ $# -ge 1 ]] || die "usage: saturn run [-e NAME=VALUE ...] path/to/script.jl|.R [args...]"
+  [[ $# -ge 1 ]] || die "usage: saturn run [-e NAME=VALUE ...] path/to/script.jl|.R|.py [args...]"
   lang=$(language_of "$1")
   [[ -n $DEPLOYMENT ]] || DEPLOYMENT=$(deployment)
   if [[ $lang == r ]]; then
@@ -238,6 +241,7 @@ run_job() {
 
   local helper="$SATURN_HOME/lib/saturn.R"
   [[ $lang == julia ]] && helper="$SATURN_HOME/lib/saturn.jl"
+  [[ $lang == python ]] && helper="$SATURN_HOME/lib/saturn.py"
   envs=("MY_WORKSPACE=/workspace/$(my_folder)" ${envs[@]+"${envs[@]}"})
   overrides=$(ENVS=$(printf '%s\n' ${envs[@]+"${envs[@]}"}) HELPER_FILE=$helper python3 -c '
 import json, os, sys
@@ -560,6 +564,7 @@ s = json.loads(sys.argv[1])
 env = {
     "WORKSPACE": sys.argv[2], "SATELLITE": sys.argv[3], "DATA_BUCKET": sys.argv[4], "AWS_REGION": sys.argv[5],
     "DATASETS": sys.argv[7], "SATURN_R": sys.argv[8] + "/lib/saturn.R", "SATURN_JL": sys.argv[8] + "/lib/saturn.jl",
+    "SATURN_PY": sys.argv[8] + "/lib/saturn.py",
     "MY_WORKSPACE": sys.argv[2] + "/" + sys.argv[9],
     "DB_HOST": "127.0.0.1", "DB_PORT": sys.argv[6], "DB_USER": s["username"], "DB_PASSWORD": s["password"],
 }

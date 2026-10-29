@@ -1,6 +1,6 @@
 # saturn-v
 
-Run heavy Julia and R jobs on AWS from your laptop, with the same code in both places.
+Run heavy Julia, R and Python jobs on AWS from your laptop, with the same code in both places.
 
 You work on your laptop as usual. When a job needs more than your laptop has, `saturn run` sends it to a machine on AWS Fargate (up to 32 cores and 244 GB of memory), streams its output to your terminal, and records what it cost. Your laptop can sleep or disconnect while the job runs.
 
@@ -114,6 +114,11 @@ using Rasters, ArchGDAL
 r = Raster(joinpath(ENV["SATELLITE"], "ntl", "sl", "rad", "<file>.tif"); lazy=true)
 ```
 
+```python
+import os, rasterio
+r = rasterio.open(os.path.join(os.environ["SATELLITE"], "ntl/sl/rad/<file>.tif"))
+```
+
 Paths relative to your script's folder also work in both places.
 
 Reading satellite files on your laptop downloads them (about $0.11/GB), so try things on a few files or a small area there, and do the heavy reading in a job, where it's free.
@@ -127,6 +132,7 @@ Put your script in your own folder in the workspace, for example `~/aws/workspac
 ```sh
 saturn run <you>/project/main.jl
 saturn run <you>/project/analysis.R
+saturn run <you>/project/analysis.py
 CPU=16384 MEMORY=65536 saturn run <you>/project/main.jl
 saturn run -e START=2014-01 <you>/project/main.jl
 ```
@@ -135,7 +141,8 @@ The third line asks for a bigger machine (16 cores, 64 GB); the fourth sets an e
 
 - **Julia:** packages come from the `Project.toml` (and `Manifest.toml`) next to the script or in a folder above it.
 - **R:** the image has R 4.6 with terra, sf, GDAL, the tidyverse and more. For anything else, keep an `renv.lock` next to the script; see [R packages with renv](#r-packages-with-renv).
-- Packages are cached in the workspace, so only the first run installs them.
+- **Python:** packages come from the `pyproject.toml` (and `uv.lock`) next to the script or in a folder above it, a `requirements.txt` next to the script, or the script's own header; see [Python packages](#python-packages).
+- Julia and R packages are cached in the workspace, so only the first run installs them.
 - Anything the job writes under `/workspace/<you>/...` appears in `~/aws/workspace/<you>/...` within a minute or two.
 
 | Size | Settings | Approx. cost per hour |
@@ -205,6 +212,22 @@ cat(requireNamespace("RMariaDB", quietly = TRUE), "\n")
 
 saved as `check.R` and run with `saturn run <you>/check.R` (about a cent).
 
+## Python packages
+
+Python jobs run with [uv](https://docs.astral.sh/uv/), which installs the packages your script needs before running it, and the Python version it asks for (3.13 otherwise). Say what the script needs in one of these ways:
+
+- **A `pyproject.toml`** in the script's folder or a folder above it (a uv project: `uv init`, `uv add pandas`). The `uv.lock` next to it pins exact versions; keep both.
+- **A `requirements.txt`** next to the script.
+- **A header in the script itself**, for a single file (`uv add --script analysis.py pandas` writes it):
+
+  ```python
+  # /// script
+  # dependencies = ["pandas", "duckdb"]
+  # ///
+  ```
+
+On your laptop, `uv run analysis.py` runs it the same way (install uv with `brew install uv`, or `curl -LsSf https://astral.sh/uv/install.sh | sh` on Linux). Each job installs its packages afresh, which takes a few seconds. rasterio, geopandas and pyogrio come with their own GDAL, so nothing else is needed for the satellite data.
+
 ## Watching and managing jobs
 
 ```sh
@@ -251,12 +274,22 @@ con = saturn_db("hhd")
 df = DBInterface.execute(con, "SELECT * FROM member_income_monthly WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10") |> DataFrame
 ```
 
+Python (add `duckdb` to the script's packages):
+
+```python
+import os
+exec(open(os.environ["SATURN_PY"]).read())
+con = saturn_db("hhd")
+
+df = con.sql("SELECT * FROM member_income_monthly WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10").df()   # .df() needs pandas; .pl() polars
+```
+
 `saturn_db()` finds the dataset's tables by itself and makes each one available under its database name. To use several datasets in one query, add them to the same connection: `saturn_db("fld", con = con)`.
 
 After that, query the tables with SQL as before, or with dplyr: `tbl(con, "hh_income_monthly") |> filter(STATE == "Karnataka")`.
 
 - **Filter on `YEAR` and `STATE`** whenever you can: those skip whole folders. Filters on `MONTH_SLOT_DATE` and `DISTRICT` are fast too.
-- **Do the heavy work in SQL** (joins, date conversions, sorting), not in R or Julia afterwards: DuckDB uses every core. Pull only the result into R or Julia.
+- **Do the heavy work in SQL** (joins, date conversions, sorting), not in R, Julia or Python afterwards: DuckDB uses every core. Pull only the result into R, Julia or Python.
 - **On your laptop,** a query reads only the columns and folders it needs, but all-India pulls of many columns are best run as a job.
 - The `hhd` data is a copy of the database as of 27 Oct 2026.
 
