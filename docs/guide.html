@@ -206,9 +206,9 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
 
       <div class="quick">
         <ol>
-          <li><span class="n">1</span><div><p><b>Get an account.</b> Ask an admin to create your AWS user and add it to <code>saturn-v-users</code>. At first sign-in, set a password and add MFA.</p></div></li>
+          <li><span class="n">1</span><div><p><b>Get an account.</b> Ask an admin to add you. You get an email from AWS: set a password and register MFA.</p></div></li>
           <li><span class="n">2</span><div><p><b>Install once</b> (<a href="#setup">Mac or Linux steps</a>), then each session:</p>
-            <div class="code"><pre><span class="p">$ </span>aws login --profile aws-server
+            <div class="code"><pre><span class="p">$ </span>saturn login
 <span class="p">$ </span>saturn connect</pre></div></div></li>
           <li><span class="n">3</span><div><p><b>Put your script in your folder</b> in the shared workspace, <code>~/aws/workspace/&lt;you&gt;/</code>, and try it locally.</p></div></li>
           <li><span class="n">4</span><div><p><b>Run it on AWS.</b> The path is relative to the workspace.</p>
@@ -258,11 +258,10 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
 brew install awscli rclone
 brew install --cask session-manager-plugin
 
-git clone git@github.com:xKDR/saturn-v.git
+git clone https://github.com/xKDR/saturn-v.git
 cd saturn-v
 echo "export PATH=\"$PWD/bin:\$PATH\"" &gt;&gt; ~/.zshrc
-echo '[ -f ~/.config/saturn-v/env ] &amp;&amp; set -a &amp;&amp; . ~/.config/saturn-v/env &amp;&amp; set +a' &gt;&gt; ~/.zshrc
-aws configure set region ap-south-1 --profile aws-server</pre></div>
+echo '[ -f ~/.config/saturn-v/env ] &amp;&amp; set -a &amp;&amp; . ~/.config/saturn-v/env &amp;&amp; set +a' &gt;&gt; ~/.zshrc</pre></div>
           <p>Open a new terminal afterwards.</p>
         </div>
         <div class="tabpanel" data-key="linux" role="tabpanel" hidden>
@@ -273,35 +272,33 @@ curl -fsSL https://rclone.org/install.sh | sudo bash
 curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
 sudo dpkg -i /tmp/smp.deb
 
-git clone git@github.com:xKDR/saturn-v.git
+git clone https://github.com/xKDR/saturn-v.git
 cd saturn-v
 echo "export PATH=\"$PWD/bin:\$PATH\"" &gt;&gt; ~/.bashrc
-echo '[ -f ~/.config/saturn-v/env ] &amp;&amp; set -a &amp;&amp; . ~/.config/saturn-v/env &amp;&amp; set +a' &gt;&gt; ~/.bashrc
-aws configure set region ap-south-1 --profile aws-server</pre></div>
+echo '[ -f ~/.config/saturn-v/env ] &amp;&amp; set -a &amp;&amp; . ~/.config/saturn-v/env &amp;&amp; set +a' &gt;&gt; ~/.bashrc</pre></div>
           <ul>
             <li><b>Fedora:</b> use <code>dnf</code>, and the plugin's <code>linux_64bit/session-manager-plugin.rpm</code>. On ARM, use <code>ubuntu_arm64</code> or <code>linux_arm64</code>.</li>
             <li><b>Zsh:</b> use <code>~/.zshrc</code> instead of <code>~/.bashrc</code>.</li>
-            <li><b>A server without a browser:</b> sign in with <code>aws login --profile aws-server --remote</code>, which prints a link to open on any device.</li>
+            <li><b>A server without a browser:</b> sign in with <code>saturn login --use-device-code</code>, which prints a link and a code to enter on any phone or laptop.</li>
           </ul>
         </div>
       </div>
-      <p>The two <code>echo</code> lines put <code>saturn</code> on your path and load the job's environment variables into every new terminal while you're connected. The last line saves the AWS region (Mumbai).</p>
+      <p>The two <code>echo</code> lines put <code>saturn</code> on your path and load the job's environment variables into every new terminal while you're connected.</p>
       <p>To update saturn later: <code>git -C ~/saturn-v pull</code> (or wherever you cloned it), then <code>saturn disconnect</code> and <code>saturn connect</code>.</p>
     </section>
 
     <section id="session">
       <h2>Each session</h2>
-      <div class="code"><pre><span class="p">$ </span>aws login --profile aws-server     <span class="c"># opens your browser; lasts up to 12 hours</span>
+      <div class="code"><pre><span class="p">$ </span>saturn login       <span class="c"># opens your browser; lasts 7 days</span>
 <span class="p">$ </span>saturn connect</pre></div>
-      <p><code>saturn connect</code> does five things:</p>
+      <p><code>saturn connect</code> does four things:</p>
       <ul>
         <li>mounts the shared workspace at <code>~/aws/workspace</code>, and the satellite data and datasets (read-only) at <code>~/aws/satellite</code> and <code>~/aws/datasets</code>;</li>
         <li>opens a tunnel to the database on <code>127.0.0.1:3306</code>, and reopens it in the background if it drops;</li>
         <li>creates your own folder, <code>~/aws/workspace/&lt;your user name&gt;</code>;</li>
         <li>writes the job's environment variables to <code>~/.config/saturn-v/env</code>, which new terminals load;</li>
-        <li>the first time, creates a mount key on your account that can only use the three buckets.</li>
-      </ul>
-      <p>Because of that key, the mounts keep working after your 12-hour sign-in expires. Running jobs and reopening the tunnel still need a current sign-in; run <code>aws login --profile aws-server</code> again when asked.</p>
+              </ul>
+      <p>Everything runs on your sign-in, the mounts included: AWS keys renew in the background for the whole week, and nothing secret is stored on your laptop. When the week is up, saturn asks you to run <code>saturn login</code> again.</p>
       <p><code>saturn status</code> shows what's connected. <code>saturn disconnect</code> undoes it all. In the terminal you're already in, <code>eval "$(saturn connect)"</code> also sets the variables there.</p>
     </section>
 
@@ -601,14 +598,13 @@ con.close()</pre></div>
       <details><summary>"Connections using insecure transport are prohibited"</summary><div><p>Add the SSL option: <code>client.flag = RMariaDB::CLIENT_SSL</code> in R, <code>ssl_mode=:required</code> in Julia.</p></div></details>
       <details><summary>Port 3306 is already in use</summary><div><p>Something on your laptop (a local MySQL, say) uses it. Connect with <code>DB_LOCAL_PORT=13306 saturn connect</code>; <code>DB_PORT</code> then says 13306.</p></div></details>
       <details><summary>A job's output file isn't on my laptop yet</summary><div><p>Files written by a job take a minute or two to appear in <code>~/aws/workspace</code>.</p></div></details>
-      <details><summary>"you already have two access keys"</summary><div><p>AWS allows two keys per person, so saturn's mount key works on two computers. Delete one you no longer use under Security credentials in the AWS console, then run <code>saturn connect</code> again.</p></div></details>
-      <details><summary>saturn asks me to sign in</summary><div><p>Your 12-hour sign-in expired. Run <code>aws login --profile aws-server</code>. The mounts keep working meanwhile.</p></div></details>
+      <details><summary>saturn asks me to sign in</summary><div><p>Your weekly sign-in expired. Run <code>saturn login</code>, then carry on.</p></div></details>
     </section>
 
     <section id="cheatsheet">
       <h2>Cheat sheet</h2>
       <div class="cheat">
-        <div><code>aws login --profile aws-server</code><span>Sign in (12 hours)</span></div>
+        <div><code>saturn login</code><span>Sign in (lasts 7 days)</span></div>
         <div><code>saturn connect</code><span>Mounts, tunnel, environment</span></div>
         <div><code>saturn status</code><span>What's connected</span></div>
         <div><code>saturn disconnect</code><span>Undo connect</span></div>

@@ -63,7 +63,7 @@ usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2; }
 
 die() { echo "saturn: $*" >&2; exit 1; }
 
-# The signed-in AWS user name, and their folder in the workspace (lower case, e.g. sanjuktha.athreya).
+# The signed-in AWS user name, and their folder in the workspace (lower case, e.g. firstname.lastname).
 # With Identity Center the name can be an email address; the part before the @ is used.
 me() { aws sts get-caller-identity --query Arn --output text | sed 's|.*/||; s|@.*||'; }
 my_folder() { me | tr '[:upper:]' '[:lower:]'; }

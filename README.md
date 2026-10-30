@@ -14,26 +14,25 @@ The AWS side (buckets, cluster, permissions) is managed in [xKDR/AWS-Server](htt
 
 ## Getting access
 
-Ask an admin to create your AWS user and add it to the `saturn-v-users` group. You'll get a sign-in link, a user name and a password. At your first sign-in, set a new password and add MFA under **Security credentials**.
+Ask an admin to add you to saturn-v. You'll get an email from AWS ("Invitation to join AWS IAM Identity Center"): open it within 7 days, set a password and register MFA (an authenticator app, or Touch ID / a passkey).
 
 ## Setup (once)
 
 ### On a Mac
 
-Install the tools, then clone this repository into any folder you like and run the last three lines from inside it:
+Install the tools, then clone this repository into any folder you like and run the last two lines from inside it:
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew install awscli rclone
 brew install --cask session-manager-plugin
-git clone git@github.com:xKDR/saturn-v.git
+git clone https://github.com/xKDR/saturn-v.git
 cd saturn-v
 echo "export PATH=\"$PWD/bin:\$PATH\"" >> ~/.zshrc
 echo '[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a' >> ~/.zshrc
-aws configure set region ap-south-1 --profile aws-server
 ```
 
-The first `echo` puts `saturn` on your path (wherever you cloned it); the second loads the job environment in every terminal while you're connected. The last line saves the AWS region (Mumbai), so signing in doesn't ask for it. Open a new terminal afterwards.
+The first `echo` puts `saturn` on your path (wherever you cloned it); the second loads the job environment in every terminal while you're connected. Open a new terminal afterwards.
 
 ### On Linux
 
@@ -46,26 +45,25 @@ unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install
 curl -fsSL https://rclone.org/install.sh | sudo bash
 curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
 sudo dpkg -i /tmp/smp.deb
-git clone git@github.com:xKDR/saturn-v.git
+git clone https://github.com/xKDR/saturn-v.git
 cd saturn-v
 echo "export PATH=\"$PWD/bin:\$PATH\"" >> ~/.bashrc
 echo '[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a' >> ~/.bashrc
-aws configure set region ap-south-1 --profile aws-server
 ```
 
 - **Fedora/RHEL:** `sudo dnf install -y git unzip curl python3 perl fuse3`, and the plugin with `sudo dnf install -y https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm`. On ARM machines use `ubuntu_arm64` / `linux_arm64` in the plugin URL.
 - **Zsh users:** use `~/.zshrc` instead of `~/.bashrc`.
-- **Machines without a browser** (a server over SSH): sign in with `aws login --profile aws-server --remote`. It prints a link to open on any device, then asks for the code that page shows.
+- **Machines without a browser** (a server over SSH): sign in with `saturn login --use-device-code`. It prints a link and a code to enter on any phone or laptop.
 - On Linux, the mounts use FUSE.
 
 ## Each session
 
 ```sh
-aws login --profile aws-server
+saturn login
 saturn connect
 ```
 
-`aws login` opens your browser to sign in; a sign-in lasts up to 12 hours. If it asks for a region, enter `ap-south-1`. `saturn connect` then:
+`saturn login` opens your browser to sign in at xKDR's AWS access portal, with your password and MFA. A sign-in lasts **7 days**; saturn says when it's time to sign in again. `saturn connect` then:
 
 - mounts the shared workspace at `~/aws/workspace`, and the satellite data and the [datasets](#datasets-parquet), read-only, at `~/aws/satellite` and `~/aws/datasets`;
 - opens a tunnel to the database on `127.0.0.1:3306`;
@@ -75,7 +73,9 @@ saturn connect
 
 For the terminal you're in, use `eval "$(saturn connect)"` instead, which also sets the variables there. `saturn status` shows what's connected; `saturn disconnect` undoes it all.
 
-The first `saturn connect` creates a mount key on your account (kept in `~/.config/saturn-v/`), which AWS only lets use the three buckets. The mounts use it, so they keep working after your 12-hour sign-in expires. AWS allows two keys per person, so two computers; for a third, delete an old key under Security credentials in the AWS console. For everything else (running jobs, reopening the tunnel), sign in again with `aws login --profile aws-server` when asked.
+Everything, the mounts included, runs on your sign-in: AWS keys are renewed in the background for the whole week, and nothing secret is stored on your laptop.
+
+**Still have an IAM user** (signing in with `aws login --profile aws-server`, from before the switch)? That keeps working until an admin removes it; `saturn login` once moves you over.
 
 ## Organising the workspace
 
@@ -83,7 +83,7 @@ Everyone shares one workspace, so keep to this layout:
 
 | Folder | For |
 | --- | --- |
-| `<your user name>/` (e.g. `sanjuktha.athreya/`) | your own work. `saturn connect` creates it; `MY_WORKSPACE` points to it, on your laptop and in your jobs |
+| `<your user name>/` (e.g. `firstname.lastname/`) | your own work. `saturn connect` creates it; `MY_WORKSPACE` points to it, on your laptop and in your jobs |
 | `shared/<project>/` | work several people use; agree on the folder name with them |
 | `db/`, `costs/`, `.julia/`, `.R/` | used by saturn itself; leave them alone |
 
