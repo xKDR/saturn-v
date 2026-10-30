@@ -174,7 +174,7 @@ setwd("~/aws/workspace/<you>/project")
 renv::init()
 ```
 
-This creates `renv.lock`, a `renv/` folder and an `.Rprofile`. From now on, R started in this folder uses the project's own packages.
+This creates `renv.lock`, a `renv/` folder and an `.Rprofile`. From now on, R started in this folder uses the project's own packages. The packages themselves are installed on your laptop (`RENV_PATHS_LIBRARY_ROOT`, set by `saturn connect`), not in the shared workspace; in RStudio, run `readRenviron("~/.config/saturn-v/env")` before `renv::init()`.
 
 **Add a package:**
 

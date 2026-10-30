@@ -386,43 +386,101 @@ out = os.path.join(os.environ["MY_WORKSPACE"], "project", "results.parquet")</pr
 
     <section id="packages">
       <h2>Packages</h2>
-      <p>A job installs the packages your project lists, then runs your script.</p>
+
+      <h3>Why a project lists its packages</h3>
+      <p>On your laptop, a package you installed once is there for every script. A job starts on a <b>fresh machine</b> that has none of them. It needs a list of what to install, and it can only read that list from files in your project folder.</p>
+      <p>The list also pins <b>versions</b>. Packages change: a new release can rename a function, change a default or shift a result. With versions pinned, the job uses exactly what you tested on your laptop, and so does a colleague running your code, or you in a year when a referee asks for a rerun.</p>
+      <p>And each project gets <b>its own list</b>. Upgrading a package for one project doesn't quietly change another.</p>
+      <p>Each language keeps two kinds of information:</p>
+      <div class="table"><table>
+        <thead><tr><th></th><th>What you use</th><th>Exact versions of everything</th><th>The job runs</th></tr></thead>
+        <tbody>
+          <tr><td>Julia</td><td><code>Project.toml</code></td><td><code>Manifest.toml</code></td><td><code>Pkg.instantiate()</code></td></tr>
+          <tr><td>R</td><td>(renv reads your code)</td><td><code>renv.lock</code></td><td><code>renv::restore()</code></td></tr>
+          <tr><td>Python</td><td><code>pyproject.toml</code>, <code>requirements.txt</code> or the script header</td><td><code>uv.lock</code></td><td><code>uv run</code></td></tr>
+        </tbody>
+      </table></div>
+      <p>"Everything" includes the packages your packages depend on, which is why the version files are long. You never edit them by hand; the commands below write them.</p>
+
       <div class="tabs" data-group="lang">
         <div class="tablist" role="tablist" aria-label="Language">
-          <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
-          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia</button>
-          <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
+          <button type="button" role="tab" data-key="r" aria-selected="true">R (renv)</button>
+          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia (Project.toml)</button>
+          <button type="button" role="tab" data-key="python" aria-selected="false">Python (uv)</button>
         </div>
+
         <div class="tabpanel" data-key="r" role="tabpanel">
-          <p>The R image already has terra, sf, GDAL, the tidyverse and more. For anything else, or exact versions, use <a href="https://rstudio.github.io/renv/">renv</a>. It records your packages in <code>renv.lock</code>, which the job installs from.</p>
-          <div class="code"><pre><span class="c"># once, in the project folder</span>
-setwd("~/aws/workspace/&lt;you&gt;/project")
-renv::init()
+          <p><b>Do you need renv?</b> Not if your script only uses packages already in the R image: terra, sf, GDAL, the tidyverse, data.table, DBI and more. Add renv when you need anything else, or exact versions.</p>
 
-<span class="c"># adding a package</span>
-install.packages("RMariaDB")
-renv::snapshot()     <span class="c"># writes it to renv.lock; without this the job won't have it</span>
+          <h3>Start a project (once)</h3>
+          <div class="code"><pre>setwd("~/aws/workspace/&lt;you&gt;/project")
+renv::init()</pre></div>
+          <p>This writes three things into the folder: <code>renv.lock</code> (the list), a <code>renv/</code> folder, and an <code>.Rprofile</code> that switches renv on whenever R starts in this folder. R prints <i>Project '…' loaded</i> when it does.</p>
+          <p>The installed packages themselves are kept on your laptop, not in the shared workspace. <code>saturn connect</code> sets this up; in RStudio, run <code>readRenviron("~/.config/saturn-v/env")</code> before <code>renv::init()</code>.</p>
 
-renv::status()       <span class="c"># anything used but not recorded?</span></pre></div>
-          <p>The job uses the same R version as your <code>renv.lock</code> (4.5 and 4.6 are available; without a lock file, the newest). Choose one with <code>R_VERSION=4.6 saturn run …</code>. Packages are cached, so only the first run installs them.</p>
+          <h3>Add a package</h3>
+          <div class="code"><pre>install.packages("fixest")
+renv::snapshot()          <span class="c"># write it to renv.lock</span></pre></div>
+          <p><code>install.packages()</code> installs it on your laptop only. <b><code>renv::snapshot()</code> is what puts it in the list</b> the job reads. Forget it, and the job fails with <i>there is no package called 'fixest'</i>.</p>
+
+          <h3>Check before running a job</h3>
+          <div class="code"><pre>renv::status()</pre></div>
+          <p>It lists packages your code uses that aren't recorded, and recorded packages that aren't installed. "No issues found" means the job will get what you have.</p>
+
+          <h3>Other things you'll do</h3>
+          <div class="code"><pre>renv::install("lrberge/fixest")   <span class="c"># from GitHub instead of CRAN; then renv::snapshot()</span>
+renv::update(); renv::snapshot()  <span class="c"># newer versions of everything</span>
+renv::remove("fixest"); renv::snapshot()
+renv::restore()                   <span class="c"># install what renv.lock lists, e.g. in a colleague's project</span></pre></div>
+
+          <h3>R versions</h3>
+          <p><code>renv.lock</code> also records your R version, and the job uses the same one (4.5 or 4.6). If yours isn't available, <code>saturn run</code> says so: upgrade R, then <code>renv::update()</code> and <code>renv::snapshot()</code>.</p>
         </div>
+
         <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
-          <p>Packages come from the <code>Project.toml</code> (and <code>Manifest.toml</code>) next to the script or in a folder above it. Add them on your laptop as usual:</p>
-          <div class="code"><pre>julia --project=.
-julia&gt; ]add DuckDB DataFrames</pre></div>
-          <p>Commit both files to the project folder. Packages are cached in the workspace, so only the first run installs them. Julia uses every core the job has.</p>
+          <p>Julia always needs a project for a job: the image has Julia and nothing else.</p>
+
+          <h3>Start a project (once)</h3>
+          <div class="code"><pre><span class="p">$ </span>cd ~/aws/workspace/&lt;you&gt;/project
+<span class="p">$ </span>julia --project=.
+julia&gt; ]add DuckDB DataFrames CSV</pre></div>
+          <p><code>--project=.</code> makes this folder the active project, so <code>add</code> writes <code>Project.toml</code> (the packages you use) and <code>Manifest.toml</code> (exact versions of everything). Keep both in the folder: the job installs from the Manifest.</p>
+
+          <h3>Run with the project</h3>
+          <div class="code"><pre><span class="p">$ </span>julia --project=. main.jl           <span class="c"># on your laptop</span>
+<span class="p">$ </span>saturn run &lt;you&gt;/project/main.jl     <span class="c"># on AWS; finds the nearest Project.toml itself</span></pre></div>
+          <p>A <code>Project.toml</code> in a folder above the script works too, so several scripts can share one project.</p>
+
+          <h3>The usual mistake</h3>
+          <p>Adding a package after starting plain <code>julia</code> (without <code>--project</code>) puts it in your personal environment, not the project's. It works on your laptop but the job fails with <i>Package DuckDB not found in current path</i>. Check which project is active, and what it has:</p>
+          <div class="code"><pre>julia&gt; ]status          <span class="c"># first line shows the active Project.toml</span>
+julia&gt; ]activate .      <span class="c"># switch to this folder's project if it's the wrong one</span></pre></div>
+
+          <h3>Other things you'll do</h3>
+          <div class="code"><pre>julia&gt; ]update               <span class="c"># newer versions of everything</span>
+julia&gt; ]rm CSV
+julia&gt; ]add DuckDB@1.2       <span class="c"># a specific version</span>
+julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lists, e.g. in a colleague's project</span></pre></div>
+          <p>Packages are cached in the workspace, so only a job's first run installs them. Julia uses every core the job has.</p>
         </div>
+
         <div class="tabpanel" data-key="python" role="tabpanel" hidden>
-          <p>Python jobs run with <a href="https://docs.astral.sh/uv/">uv</a>, which installs your packages (and the Python version you ask for; 3.13 otherwise) in a few seconds. List them in one of three ways:</p>
-          <ul>
-            <li>a <b><code>pyproject.toml</code></b> (and <code>uv.lock</code>) in the script's folder or above: <code>uv init</code>, <code>uv add pandas</code>;</li>
-            <li>a <b><code>requirements.txt</code></b> next to the script;</li>
-            <li>a <b>header in the script</b>, for single files (<code>uv add --script analysis.py pandas</code> writes it):</li>
-          </ul>
+          <p>Python jobs run with <a href="https://docs.astral.sh/uv/">uv</a>, which installs your packages (and the Python version you ask for; 3.13 otherwise) in a few seconds at the start of every job. Install it on your laptop with <code>brew install uv</code>.</p>
+
+          <h3>A single script: list packages in its header</h3>
+          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py pandas duckdb</pre></div>
+          <p>That writes this at the top of the script, which is all the job needs:</p>
           <div class="code"><pre># /// script
-# dependencies = ["pandas", "duckdb", "rasterio"]
+# dependencies = ["pandas", "duckdb"]
 # ///</pre></div>
-          <p>On your laptop, <code>uv run analysis.py</code> runs it the same way (<code>brew install uv</code>). rasterio and geopandas come with their own GDAL.</p>
+          <p>Run it with <code>uv run analysis.py</code> on your laptop and <code>saturn run &lt;you&gt;/analysis.py</code> on AWS. This is the simplest choice for code in the workspace: uv keeps the installed packages in its own cache, not in your folder.</p>
+
+          <h3>A project with several scripts</h3>
+          <div class="code"><pre><span class="p">$ </span>cd ~/aws/workspace/&lt;you&gt;/project
+<span class="p">$ </span>uv init --bare
+<span class="p">$ </span>uv add pandas duckdb</pre></div>
+          <p>This writes <code>pyproject.toml</code> (what you use) and <code>uv.lock</code> (exact versions); keep both. uv also makes a <code>.venv</code> folder here, which is slow on the shared workspace, so prefer the script header when you can. A <code>requirements.txt</code> next to the script works as well.</p>
+          <p>rasterio, geopandas and pyogrio come with their own GDAL, so nothing else is needed for the satellite data.</p>
         </div>
       </div>
     </section>
@@ -538,7 +596,7 @@ con.close()</pre></div>
     <section id="trouble">
       <h2>When something's off</h2>
       <details><summary><code>echo $DB_HOST</code> prints nothing</summary><div><p>This terminal was opened before <code>saturn connect</code>. Open a new one, or run <code>eval "$(saturn connect)"</code>. In RStudio, run <code>readRenviron("~/.config/saturn-v/env")</code>.</p></div></details>
-      <details><summary>The job doesn't have a package I installed</summary><div><p>R: run <code>renv::snapshot()</code> after <code>install.packages()</code>. Julia: add it with <code>]add</code> in the project, so it's in <code>Project.toml</code>. Python: add it to the header, <code>pyproject.toml</code> or <code>requirements.txt</code>.</p></div></details>
+      <details><summary>The job doesn't have a package I installed</summary><div><p>R: run <code>renv::snapshot()</code> after <code>install.packages()</code>, and check with <code>renv::status()</code>. Julia: start Julia with <code>--project=.</code> before <code>]add</code>; <code>]status</code> shows which project is active. Python: add it to the header, <code>pyproject.toml</code> or <code>requirements.txt</code>. See <a href="#packages">Packages</a>.</p></div></details>
       <details><summary>"R 4.x is not available on AWS"</summary><div><p>Your <code>renv.lock</code> was made with an R version AWS doesn't offer. Upgrade R on your laptop, then run <code>renv::update()</code> and <code>renv::snapshot()</code>.</p></div></details>
       <details><summary>"Connections using insecure transport are prohibited"</summary><div><p>Add the SSL option: <code>client.flag = RMariaDB::CLIENT_SSL</code> in R, <code>ssl_mode=:required</code> in Julia.</p></div></details>
       <details><summary>Port 3306 is already in use</summary><div><p>Something on your laptop (a local MySQL, say) uses it. Connect with <code>DB_LOCAL_PORT=13306 saturn connect</code>; <code>DB_PORT</code> then says 13306.</p></div></details>

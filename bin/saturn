@@ -569,13 +569,16 @@ write_env() {
   (
     umask 077
     python3 -c '
-import json, sys
+import json, os, sys
 s = json.loads(sys.argv[1])
 env = {
     "WORKSPACE": sys.argv[2], "SATELLITE": sys.argv[3], "DATA_BUCKET": sys.argv[4], "AWS_REGION": sys.argv[5],
     "DATASETS": sys.argv[7], "SATURN_R": sys.argv[8] + "/lib/saturn.R", "SATURN_JL": sys.argv[8] + "/lib/saturn.jl",
     "SATURN_PY": sys.argv[8] + "/lib/saturn.py",
     "MY_WORKSPACE": sys.argv[2] + "/" + sys.argv[9],
+    # renv installs the packages of a project on this laptop, not into its folder in the
+    # shared workspace (slow over the mount, and the job installs its own anyway).
+    "RENV_PATHS_LIBRARY_ROOT": os.path.expanduser("~/.local/share/renv/library"),
     "DB_HOST": "127.0.0.1", "DB_PORT": sys.argv[6], "DB_USER": s["username"], "DB_PASSWORD": s["password"],
 }
 print("# Written by `saturn connect`, removed by `saturn disconnect`. Same names as inside a job.")
