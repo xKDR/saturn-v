@@ -2,6 +2,7 @@
 # saturn: run heavy Julia, R and Python jobs on AWS Fargate from your laptop.
 #
 # Usage:
+#   saturn login [--use-device-code]      # sign in (IAM Identity Center); lasts up to a week
 #   saturn connect                        # workspace, satellite data and database on this laptop
 #   saturn disconnect
 #   saturn status
@@ -32,24 +33,76 @@
 # newest available; R_VERSION=4.5 chooses one.
 # Ctrl-C stops following a job; the job keeps running. Your laptop can sleep meanwhile.
 #
-# Sign in first with: aws login --profile aws-server   (region ap-south-1)
+# Sign in first with: saturn login   (IAM users, until the switch: aws login --profile aws-server)
 set -euo pipefail
 
 SATURN_HOME=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.." && pwd)
 STATE_DIR="$HOME/.config/saturn-v"
-export AWS_PROFILE="${SATURN_PROFILE:-aws-server}"
 export AWS_DEFAULT_REGION="${SATURN_REGION:-ap-south-1}"
+
+# Signed in through IAM Identity Center (`saturn login`): profile saturn-v. IAM users
+# (the sign-in before Identity Center) use `aws login` and profile aws-server.
+SSO_PROFILE=saturn-v SSO_SESSION=saturn-v
+# The access portal people sign in at, and the region Identity Center lives in (not
+# secrets; the jobs and data are in AWS_DEFAULT_REGION).
+SSO_START_URL="${SATURN_SSO_START_URL:-https://d-9067ac7cfe.awsapps.com/start}"
+SSO_REGION="${SATURN_SSO_REGION:-us-east-1}"
+if [[ -n ${SATURN_PROFILE:-} ]]; then
+  AWS_PROFILE=$SATURN_PROFILE
+elif [[ ${1:-} == login ]] || env -u AWS_PROFILE aws configure get sso_session --profile "$SSO_PROFILE" >/dev/null 2>&1; then
+  AWS_PROFILE=$SSO_PROFILE
+else
+  AWS_PROFILE=aws-server
+fi
+export AWS_PROFILE
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 mkdir -p "$STATE_DIR"
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2; }
-[[ ${1:-} =~ ^(connect|disconnect|status|run|logs|stop|list|cost|costs|__tunnel-keeper)$ ]] || usage
+[[ ${1:-} =~ ^(login|connect|disconnect|status|run|logs|stop|list|cost|costs|docs|__tunnel-keeper)$ ]] || usage
 
 die() { echo "saturn: $*" >&2; exit 1; }
 
 # The signed-in AWS user name, and their folder in the workspace (lower case, e.g. sanjuktha.athreya).
-me() { aws sts get-caller-identity --query Arn --output text | sed 's|.*/||'; }
+# With Identity Center the name can be an email address; the part before the @ is used.
+me() { aws sts get-caller-identity --query Arn --output text | sed 's|.*/||; s|@.*||'; }
 my_folder() { me | tr '[:upper:]' '[:lower:]'; }
+
+uses_sso() { [[ $AWS_PROFILE == "$SSO_PROFILE" ]]; }
+sign_in_command() { if uses_sso; then echo "saturn login"; else echo "aws login --profile $AWS_PROFILE"; fi; }
+
+# --- Sign-in (IAM Identity Center) ----------------------------------------------------
+# Signs in at the access portal (browser, or a code on another device with
+# --use-device-code), then writes the saturn-v profile for the role you have:
+# SaturnUser, or Admin for admins (also as profile saturn-v-admin, which ./tf uses).
+do_login() {
+  local config="${AWS_CONFIG_FILE:-$HOME/.aws/config}" token account roles role
+  [[ -n $SSO_START_URL ]] || die "set SATURN_SSO_START_URL to your AWS access portal (ask an admin)"
+  mkdir -p "$(dirname "$config")" && touch "$config"
+  if ! grep -q "^\[sso-session $SSO_SESSION\]" "$config"; then
+    printf '\n[sso-session %s]\nsso_start_url = %s\nsso_region = %s\nsso_registration_scopes = sso:account:access\n' \
+      "$SSO_SESSION" "$SSO_START_URL" "$SSO_REGION" >>"$config"
+  fi
+  env -u AWS_PROFILE aws sso login --sso-session "$SSO_SESSION" "$@" || exit 1
+
+  token=$(python3 -c 'import hashlib, json, os, sys
+f = os.path.expanduser("~/.aws/sso/cache/%s.json" % hashlib.sha1(sys.argv[1].encode()).hexdigest())
+print(json.load(open(f))["accessToken"])' "$SSO_SESSION")
+  account=$(env -u AWS_PROFILE aws sso list-accounts --region "$SSO_REGION" --access-token "$token" --query 'accountList[0].accountId' --output text)
+  roles=$(env -u AWS_PROFILE aws sso list-account-roles --region "$SSO_REGION" --access-token "$token" --account-id "$account" --query 'roleList[].roleName' --output text | tr '\t' ' ')
+  [[ -n $roles ]] || die "signed in, but you have no access to the AWS account yet. Ask an admin to add you to saturn-v-users."
+
+  set_profile() { # profile role
+    env -u AWS_PROFILE aws configure set sso_session "$SSO_SESSION" --profile "$1"
+    env -u AWS_PROFILE aws configure set sso_account_id "$account" --profile "$1"
+    env -u AWS_PROFILE aws configure set sso_role_name "$2" --profile "$1"
+    env -u AWS_PROFILE aws configure set region "$AWS_DEFAULT_REGION" --profile "$1"
+  }
+  if [[ " $roles " == *" SaturnUser "* ]]; then role=SaturnUser; else role=$(echo "$roles" | awk '{print $1}'); fi
+  set_profile "$SSO_PROFILE" "$role"
+  [[ " $roles " == *" Admin "* ]] && set_profile "$SSO_PROFILE-admin" Admin
+  echo "Signed in as $(me) ($role). Next: saturn connect"
+}
 
 # --- Deployment settings ---------------------------------------------------------
 # Published by xKDR/AWS-Server as the SSM parameter /saturn-v/deployment on every
@@ -59,7 +112,7 @@ deployment() {
   if fresh=$(aws ssm get-parameter --name /saturn-v/deployment --query Parameter.Value --output text 2>/dev/null); then
     printf '%s' "$fresh" >"$cache"
   elif ! aws sts get-caller-identity >/dev/null 2>&1; then
-    die "not signed in to AWS. Run: aws login --profile $AWS_PROFILE"
+    die "not signed in to AWS. Run: $(sign_in_command)"
   elif [[ ! -s $cache ]]; then
     die "can't read the deployment settings (/saturn-v/deployment). Ask an admin to add you to the team."
   fi
@@ -365,11 +418,12 @@ make_mount_key() {
 
 use_rclone_credentials() {
   local real_config="${AWS_CONFIG_FILE:-$HOME/.aws/config}"
-  if { mount_key_works || make_mount_key; } && ! mount_key_too_powerful; then
+  # Identity Center sign-ins renew their keys for the whole session: no stored key needed.
+  if ! uses_sso && { mount_key_works || make_mount_key; } && ! mount_key_too_powerful; then
     : >"$STATE_DIR/rclone-aws-config"
     export AWS_SHARED_CREDENTIALS_FILE="$STATE_DIR/mount-credentials"
   else
-    echo "(no mount key; the mounts use your sign-in and pause when it expires)"
+    uses_sso || echo "(no mount key; the mounts use your sign-in and pause when it expires)"
     cat >"$STATE_DIR/rclone-aws-config" <<EOF
 [profile rclone]
 credential_process = /usr/bin/env AWS_CONFIG_FILE=$real_config $(command -v aws) configure export-credentials --profile $AWS_PROFILE --format process
@@ -638,6 +692,7 @@ do_status() {
 }
 
 case "$1" in
+login) shift; do_login "$@" ;;
 connect) do_connect ;;
 disconnect) do_disconnect ;;
 status) do_status ;;
