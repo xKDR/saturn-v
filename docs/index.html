@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>saturn-v Guide</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -207,7 +206,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <div class="quick">
         <ol>
           <li><span class="n">1</span><div><p><b>Get an account.</b> Ask an admin to add you. You get an email from AWS: set a password and register MFA.</p></div></li>
-          <li><span class="n">2</span><div><p><b>Install once</b> (<a href="#setup">Mac or Linux steps</a>), then each session:</p>
+          <li><span class="n">2</span><div><p><b>Install once</b> with <a href="#setup">one command</a>, then each session:</p>
             <div class="code"><pre><span class="p">$ </span>saturn login
 <span class="p">$ </span>saturn connect</pre></div></div></li>
           <li><span class="n">3</span><div><p><b>Put your script in your folder</b> in the shared workspace, <code>~/aws/workspace/&lt;you&gt;/</code>, and try it locally.</p></div></li>
@@ -246,45 +245,19 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
 
     <section id="setup">
       <h2>Setup (once)</h2>
-      <p>Install the AWS command line, rclone (for the mounts) and the Session Manager plugin (for the database tunnel), then clone saturn-v.</p>
-      <div class="tabs" data-group="os">
-        <div class="tablist" role="tablist" aria-label="Operating system">
-          <button type="button" role="tab" data-key="mac" aria-selected="true">Mac</button>
-          <button type="button" role="tab" data-key="linux" aria-selected="false">Linux (Debian, Ubuntu)</button>
-        </div>
-        <div class="tabpanel" data-key="mac" role="tabpanel">
-          <div class="code"><pre><span class="c"># Homebrew, if you don't have it</span>
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install awscli rclone
-brew install --cask session-manager-plugin
-
-git clone https://github.com/xKDR/saturn-v.git
-cd saturn-v
-echo "export PATH=\"$PWD/bin:\$PATH\"" &gt;&gt; ~/.zshrc
-echo '[ -f ~/.config/saturn-v/env ] &amp;&amp; set -a &amp;&amp; . ~/.config/saturn-v/env &amp;&amp; set +a' &gt;&gt; ~/.zshrc</pre></div>
-          <p>Open a new terminal afterwards.</p>
-        </div>
-        <div class="tabpanel" data-key="linux" role="tabpanel" hidden>
-          <div class="code"><pre>sudo apt install -y git unzip curl python3 perl fuse3
-curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
-unzip -q /tmp/awscliv2.zip -d /tmp &amp;&amp; sudo /tmp/aws/install
-curl -fsSL https://rclone.org/install.sh | sudo bash
-curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
-sudo dpkg -i /tmp/smp.deb
-
-git clone https://github.com/xKDR/saturn-v.git
-cd saturn-v
-echo "export PATH=\"$PWD/bin:\$PATH\"" &gt;&gt; ~/.bashrc
-echo '[ -f ~/.config/saturn-v/env ] &amp;&amp; set -a &amp;&amp; . ~/.config/saturn-v/env &amp;&amp; set +a' &gt;&gt; ~/.bashrc</pre></div>
-          <ul>
-            <li><b>Fedora:</b> use <code>dnf</code>, and the plugin's <code>linux_64bit/session-manager-plugin.rpm</code>. On ARM, use <code>ubuntu_arm64</code> or <code>linux_arm64</code>.</li>
-            <li><b>Zsh:</b> use <code>~/.zshrc</code> instead of <code>~/.bashrc</code>.</li>
-            <li><b>A server without a browser:</b> sign in with <code>saturn login --use-device-code</code>, which prints a link and a code to enter on any phone or laptop.</li>
-          </ul>
-        </div>
-      </div>
-      <p>The two <code>echo</code> lines put <code>saturn</code> on your path and load the job's environment variables into every new terminal while you're connected.</p>
-      <p>To update saturn later: <code>git -C ~/saturn-v pull</code> (or wherever you cloned it), then <code>saturn disconnect</code> and <code>saturn connect</code>.</p>
+      <p>On a Mac or Linux, in a terminal:</p>
+      <div class="code"><pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | sh</pre></div>
+      <p>Then open a new terminal. The installer:</p>
+      <ul>
+        <li>installs the tools saturn uses: the AWS command line, rclone (for the mounts) and AWS&#8217;s Session Manager plugin (for the database tunnel). On a Mac through <a href="https://brew.sh">Homebrew</a> (install that first); on Linux into <code>~/.local</code>, without sudo;</li>
+        <li>puts saturn in <code>~/.saturn-v</code> and on your PATH;</li>
+        <li>adds two lines to your shell&#8217;s startup file, marked <code># saturn-v</code>.</li>
+      </ul>
+      <p>It&#8217;s safe to run again. To read it first, replace <code>| sh</code> with <code>| less</code>.</p>
+      <ul>
+        <li><b>Linux:</b> the mounts need FUSE (<code>sudo apt install fuse3</code>); most desktops have it, and the installer says if it&#8217;s missing.</li>
+        <li><b>Updates:</b> <code>saturn update</code>, then <code>saturn disconnect</code> and <code>saturn connect</code> if you&#8217;re connected.</li>
+      </ul>
     </section>
 
     <section id="session">

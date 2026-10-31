@@ -1,8 +1,8 @@
 # saturn-v
 
-[![User guide](https://img.shields.io/badge/user%20guide-open-c2410c)](https://claude.ai/artifact/PGUAxXyocfmX8tQW67K5JF)
+[![User guide](https://img.shields.io/badge/user%20guide-xkdr.github.io%2Fsaturn--v-c2410c)](https://xkdr.github.io/saturn-v/)
 
-**New here? Start with the [user guide](https://claude.ai/artifact/PGUAxXyocfmX8tQW67K5JF)**: the same material as this README, with the steps in order and the code in your language. After setup, `saturn docs` opens a copy from your clone. This README is the full reference.
+**New here? Start with the [user guide](https://xkdr.github.io/saturn-v/)**: the same material as this README, with the steps in order and the code in your language (`saturn docs` opens it from your copy). This README is the full reference.
 
 Run heavy Julia, R and Python jobs on AWS from your laptop, with the same code in both places.
 

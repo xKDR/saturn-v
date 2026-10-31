@@ -718,6 +718,6 @@ cost) record_cost "${2:?usage: saturn cost <task-id>}" ;;
 costs) show_costs ;;
 update) do_update ;;
 docs) # the guide in this checkout, so it matches this version of saturn
-  if command -v open >/dev/null; then open "$SATURN_HOME/docs/guide.html"; else xdg-open "$SATURN_HOME/docs/guide.html"; fi ;;
+  if command -v open >/dev/null; then open "$SATURN_HOME/docs/index.html"; else xdg-open "$SATURN_HOME/docs/index.html"; fi ;;
 __tunnel-keeper) tunnel_keeper ;;
 esac
