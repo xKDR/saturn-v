@@ -18,43 +18,23 @@ Ask an admin to add you to saturn-v. You'll get an email from AWS ("Invitation t
 
 ## Setup (once)
 
-### On a Mac
-
-Install the tools, then clone this repository into any folder you like and run the last two lines from inside it:
+On a Mac or Linux, in a terminal:
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install awscli rclone
-brew install --cask session-manager-plugin
-git clone https://github.com/xKDR/saturn-v.git
-cd saturn-v
-echo "export PATH=\"$PWD/bin:\$PATH\"" >> ~/.zshrc
-echo '[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a' >> ~/.zshrc
+curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | sh
 ```
 
-The first `echo` puts `saturn` on your path (wherever you cloned it); the second loads the job environment in every terminal while you're connected. Open a new terminal afterwards.
+Then open a new terminal. The installer:
 
-### On Linux
+- installs the tools saturn uses: the AWS CLI, rclone (for the mounts) and AWS's Session Manager plugin (for the database tunnel). On a Mac through [Homebrew](https://brew.sh) (install that first if you don't have it); on Linux into `~/.local`, without sudo;
+- puts saturn in `~/.saturn-v` and on your PATH;
+- adds two lines to your shell's startup file (marked `# saturn-v`): `~/.local/bin` on the PATH, and the job environment while you're connected.
 
-The same tools, from each project's own packages. On Debian or Ubuntu (on Fedora, use `dnf` and the `.rpm` plugin noted below):
+It's safe to run again. To read it first: `curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | less`.
 
-```sh
-sudo apt install -y git unzip curl python3 perl fuse3
-curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
-unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install
-curl -fsSL https://rclone.org/install.sh | sudo bash
-curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
-sudo dpkg -i /tmp/smp.deb
-git clone https://github.com/xKDR/saturn-v.git
-cd saturn-v
-echo "export PATH=\"$PWD/bin:\$PATH\"" >> ~/.bashrc
-echo '[ -f ~/.config/saturn-v/env ] && set -a && . ~/.config/saturn-v/env && set +a' >> ~/.bashrc
-```
-
-- **Fedora/RHEL:** `sudo dnf install -y git unzip curl python3 perl fuse3`, and the plugin with `sudo dnf install -y https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm`. On ARM machines use `ubuntu_arm64` / `linux_arm64` in the plugin URL.
-- **Zsh users:** use `~/.zshrc` instead of `~/.bashrc`.
-- **Machines without a browser** (a server over SSH): sign in with `saturn login --use-device-code`. It prints a link and a code to enter on any phone or laptop.
-- On Linux, the mounts use FUSE.
+- **Linux:** the mounts need FUSE (`sudo apt install fuse3` on Debian or Ubuntu; most desktops have it). The installer says if it's missing.
+- **Updates:** `saturn update`, then `saturn disconnect && saturn connect` if you're connected.
+- **Already cloned this repository?** That keeps working; `saturn update` runs `git pull` there.
 
 ## Each session
 

@@ -12,6 +12,7 @@
 #   saturn list                           # running jobs
 #   saturn costs                          # spending per month and person
 #   saturn docs                           # open the user guide in your browser
+#   saturn update                         # get the newest saturn
 #   saturn cost <task-id>                 # (re)compute one job's cost
 #
 # After `saturn connect`, this laptop has the same environment variables as a job
@@ -59,7 +60,7 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 mkdir -p "$STATE_DIR"
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2; }
-[[ ${1:-} =~ ^(login|connect|disconnect|status|run|logs|stop|list|cost|costs|docs|__tunnel-keeper)$ ]] || usage
+[[ ${1:-} =~ ^(login|connect|disconnect|status|run|logs|stop|list|cost|costs|docs|update|__tunnel-keeper)$ ]] || usage
 
 die() { echo "saturn: $*" >&2; exit 1; }
 
@@ -102,6 +103,17 @@ print(json.load(open(f))["accessToken"])' "$SSO_SESSION")
   set_profile "$SSO_PROFILE" "$role"
   [[ " $roles " == *" Admin "* ]] && set_profile "$SSO_PROFILE-admin" Admin
   echo "Signed in as $(me) ($role). Next: saturn connect"
+}
+
+# The newest saturn: git pull for a clone, else the installer (saturn only, not the tools).
+do_update() {
+  if [[ -d $SATURN_HOME/.git ]]; then
+    git -C "$SATURN_HOME" pull --ff-only
+  else
+    curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh |
+      SATURN_SKIP_TOOLS=1 SATURN_HOME="$SATURN_HOME" sh
+  fi
+  echo "If you're connected, reconnect to use it: saturn disconnect && saturn connect"
 }
 
 # --- Deployment settings ---------------------------------------------------------
@@ -704,6 +716,7 @@ stop) aws ecs stop-task --cluster "$(cfg cluster)" --task "${2:?usage: saturn st
 list) aws ecs list-tasks --cluster "$(cfg cluster)" --query 'taskArns[]' --output text | tr '\t' '\n' | sed 's|.*/||' ;;
 cost) record_cost "${2:?usage: saturn cost <task-id>}" ;;
 costs) show_costs ;;
+update) do_update ;;
 docs) # the guide in this checkout, so it matches this version of saturn
   if command -v open >/dev/null; then open "$SATURN_HOME/docs/guide.html"; else xdg-open "$SATURN_HOME/docs/guide.html"; fi ;;
 __tunnel-keeper) tunnel_keeper ;;
