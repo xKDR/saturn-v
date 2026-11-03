@@ -221,7 +221,7 @@ saturn costs
 
 `saturn list` shows running jobs. `saturn logs` follows a job's output again; Ctrl-C stops following, not the job. `saturn costs` shows spending per month and person.
 
-When any job ends, its cost is recorded and a summary (who, script, machine, runtime, cost) is posted to the team's Mattermost channel. This happens in AWS, so it works even if your laptop is closed.
+When any job ends, its cost is recorded and a summary (who, script, machine, runtime, cost) is posted to the team's Zulip channel, tagging the person who ran it. This happens in AWS, so it works even if your laptop is closed.
 
 ## Datasets (DuckDB)
 

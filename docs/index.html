@@ -516,7 +516,7 @@ df = con.sql("""
 <span class="p">$ </span>saturn logs &lt;task-id&gt;       <span class="c"># follow a job's output again</span>
 <span class="p">$ </span>saturn stop &lt;task-id&gt;
 <span class="p">$ </span>saturn costs                <span class="c"># spending per month and person</span></pre></div>
-      <p>When a job ends, a notice goes to the team's Mattermost channel with who ran it, the script, the machine, the runtime and the cost. It comes from AWS, so it arrives even if your laptop is closed. Every Monday at 9:00 a summary of the past week follows, with jobs, failures, hours and spend per person.</p>
+      <p>When a job ends, a notice goes to the team's Zulip channel, tagging the person who ran it, with the script, the machine, the runtime and the cost. It comes from AWS, so it arrives even if your laptop is closed. Every Monday at 9:00 a summary of the past week follows, with jobs, failures, hours and spend per person.</p>
     </section>
 
     <section id="trouble">
@@ -592,7 +592,7 @@ con.close()</pre></div>
       <details><summary>"Connections using insecure transport are prohibited"</summary><div><p>Add the SSL option: <code>client.flag = RMariaDB::CLIENT_SSL</code> in R, <code>ssl_mode=:required</code> in Julia.</p></div></details>
       <details><summary>Port 3306 is already in use</summary><div><p>Something on your laptop (a local MySQL, say) uses it. Connect with <code>DB_LOCAL_PORT=13306 saturn connect</code>; <code>DB_PORT</code> then says 13306.</p></div></details>
       <p>The tunnel goes through a small server on AWS, which <code>saturn connect</code> starts if it&#8217;s stopped.</p>
-      <footer>The full reference is the <a href="https://github.com/xKDR/saturn-v">saturn-v README</a>. Questions go to the team's Mattermost channel.</footer>
+      <footer>The full reference is the <a href="https://github.com/xKDR/saturn-v">saturn-v README</a>. Questions go to the team's Zulip channel.</footer>
     </section>
 
   </main>
