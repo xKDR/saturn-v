@@ -181,11 +181,11 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <li><a class="item" href="#same-code">Same code everywhere</a></li>
       <li><a class="item" href="#run">Running a job</a></li>
       <li><a class="item" href="#packages">Packages</a></li>
-      <li><a class="item" href="#datasets">Datasets (Parquet)</a></li>
-      <li><a class="item" href="#database">The database</a></li>
+      <li><a class="item" href="#datasets">Data (DuckDB)</a></li>
       <li><a class="item" href="#jobs">Jobs and costs</a></li>
       <li><a class="item" href="#trouble">When something's off</a></li>
       <li><a class="item" href="#cheatsheet">Cheat sheet</a></li>
+      <li><a class="item" href="#appendix-mariadb">Appendix: MariaDB</a></li>
     </ol>
     <div class="lang-pick">
       <span class="label">Show code in</span>
@@ -218,15 +218,14 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
 
     <section id="how">
       <h2>How it fits together</h2>
-      <p>After <code>saturn connect</code>, your laptop sees the same files, data and database a job does, under the same names. That's why a script you try locally runs unchanged on AWS.</p>
-      <div class="fit" role="img" aria-label="Your laptop and an AWS job see the same workspace, satellite data, datasets and database.">
+      <p>After <code>saturn connect</code>, your laptop sees the same files and data a job does, under the same names. That's why a script you try locally runs unchanged on AWS.</p>
+      <div class="fit" role="img" aria-label="Your laptop and an AWS job see the same workspace, satellite data and datasets.">
         <div class="box">
           <h4>Your laptop</h4>
           <ul>
             <li><span>Shared workspace</span><span>~/aws/workspace</span></li>
             <li><span>Satellite data (read-only)</span><span>~/aws/satellite</span></li>
             <li><span>Parquet datasets (read-only)</span><span>~/aws/datasets</span></li>
-            <li><span>Database</span><span>127.0.0.1:3306</span></li>
           </ul>
         </div>
         <div class="arrow"><b>⇄</b>same names</div>
@@ -236,7 +235,6 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
             <li><span>Shared workspace</span><span>/workspace</span></li>
             <li><span>Satellite data</span><span>/vsis3/…</span></li>
             <li><span>Parquet datasets</span><span>s3://…</span></li>
-            <li><span>Database</span><span>mayin-data</span></li>
           </ul>
         </div>
       </div>
@@ -249,7 +247,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <div class="code"><pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | sh</pre></div>
       <p>Then open a new terminal. The installer:</p>
       <ul>
-        <li>installs the tools saturn uses: the AWS command line, rclone (for the mounts) and AWS&#8217;s Session Manager plugin (for the database tunnel). On a Mac through <a href="https://brew.sh">Homebrew</a> (install that first); on Linux into <code>~/.local</code>, without sudo;</li>
+        <li>installs the tools saturn uses: the AWS command line, rclone (for the mounts) and AWS&#8217;s Session Manager plugin (for the MariaDB tunnel; see the <a href="#appendix-mariadb">appendix</a>). On a Mac through <a href="https://brew.sh">Homebrew</a> (install that first); on Linux into <code>~/.local</code>, without sudo;</li>
         <li>puts saturn in <code>~/.saturn-v</code> and on your PATH;</li>
         <li>adds two lines to your shell&#8217;s startup file, marked <code># saturn-v</code>.</li>
       </ul>
@@ -267,7 +265,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <p><code>saturn connect</code> does four things:</p>
       <ul>
         <li>mounts the shared workspace at <code>~/aws/workspace</code>, and the satellite data and datasets (read-only) at <code>~/aws/satellite</code> and <code>~/aws/datasets</code>;</li>
-        <li>opens a tunnel to the database on <code>127.0.0.1:3306</code>, and reopens it in the background if it drops;</li>
+        <li>opens a tunnel to the MariaDB database on <code>127.0.0.1:3306</code> (see the <a href="#appendix-mariadb">appendix</a>), and reopens it in the background if it drops;</li>
         <li>creates your own folder, <code>~/aws/workspace/&lt;your user name&gt;</code>;</li>
         <li>writes the job's environment variables to <code>~/.config/saturn-v/env</code>, which new terminals load;</li>
               </ul>
@@ -299,8 +297,6 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
           <tr><td><code>MY_WORKSPACE</code></td><td><code>/workspace/&lt;you&gt;</code></td><td><code>~/aws/workspace/&lt;you&gt;</code></td></tr>
           <tr><td><code>SATELLITE</code></td><td><code>/vsis3/&lt;bucket&gt;</code>, read straight from S3</td><td><code>~/aws/satellite</code></td></tr>
           <tr><td><code>DATASETS</code></td><td><code>s3://&lt;bucket&gt;</code></td><td><code>~/aws/datasets</code></td></tr>
-          <tr><td><code>DB_HOST</code>, <code>DB_PORT</code></td><td>the database</td><td><code>127.0.0.1</code> and the tunnel port</td></tr>
-          <tr><td><code>DB_USER</code>, <code>DB_PASSWORD</code></td><td colspan="2">the shared, read-only <code>aws_jobs</code> login</td></tr>
         </tbody>
       </table></div>
       <h3>Reading a satellite file</h3>
@@ -456,8 +452,8 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
     </section>
 
     <section id="datasets">
-      <h2>Datasets (Parquet)</h2>
-      <p>Large datasets are kept as Parquet files, laid out for fast filtering. DuckDB reads them far faster than the database: a job pulled all-India CPHS income, consumption and member income in under two minutes, where the same queries against MariaDB take hours.</p>
+      <h2>Data (DuckDB)</h2>
+      <p>This is where to get data. The datasets are Parquet files, laid out for fast filtering, and you query them with DuckDB: a job pulled all-India CPHS income, consumption and member income in under two minutes.</p>
       <div class="table"><table>
         <thead><tr><th>Dataset</th><th>Tables</th><th>Split by</th></tr></thead>
         <tbody>
@@ -510,13 +506,55 @@ df = con.sql("""
         <li><b>Do the heavy work in SQL</b> (joins, date conversions, sorting). DuckDB uses every core; pull only the result into your language.</li>
         <li><b>All-India pulls of many columns</b> belong in a job, not on your laptop.</li>
         <li>To query several datasets together, add them to one connection: <code>saturn_db("fld", con = con)</code>.</li>
-        <li>The <code>hhd</code> data is a copy of the database as of 27 Oct 2026.</li>
+        <li>The <code>hhd</code> data is a copy of the MariaDB <code>hhd</code> database as of 27 Oct 2026. For tables that aren't in the datasets, see the <a href="#appendix-mariadb">appendix</a>.</li>
       </ul>
     </section>
 
-    <section id="database">
-      <h2>The database</h2>
+    <section id="jobs">
+      <h2>Jobs and costs</h2>
+      <div class="code"><pre><span class="p">$ </span>saturn list                 <span class="c"># running jobs</span>
+<span class="p">$ </span>saturn logs &lt;task-id&gt;       <span class="c"># follow a job's output again</span>
+<span class="p">$ </span>saturn stop &lt;task-id&gt;
+<span class="p">$ </span>saturn costs                <span class="c"># spending per month and person</span></pre></div>
+      <p>When a job ends, a notice goes to the team's Mattermost channel with who ran it, the script, the machine, the runtime and the cost. It comes from AWS, so it arrives even if your laptop is closed. Every Monday at 9:00 a summary of the past week follows, with jobs, failures, hours and spend per person.</p>
+    </section>
+
+    <section id="trouble">
+      <h2>When something's off</h2>
+      <details><summary><code>echo $WORKSPACE</code> prints nothing</summary><div><p>This terminal was opened before <code>saturn connect</code>. Open a new one, or run <code>eval "$(saturn connect)"</code>. In RStudio, run <code>readRenviron("~/.config/saturn-v/env")</code>.</p></div></details>
+      <details><summary>The job doesn't have a package I installed</summary><div><p>R: run <code>renv::snapshot()</code> after <code>install.packages()</code>, and check with <code>renv::status()</code>. Julia: start Julia with <code>--project=.</code> before <code>]add</code>; <code>]status</code> shows which project is active. Python: add it to the header, <code>pyproject.toml</code> or <code>requirements.txt</code>. See <a href="#packages">Packages</a>.</p></div></details>
+      <details><summary>"R 4.x is not available on AWS"</summary><div><p>Your <code>renv.lock</code> was made with an R version AWS doesn't offer. Upgrade R on your laptop, then run <code>renv::update()</code> and <code>renv::snapshot()</code>.</p></div></details>
+      <details><summary>A job's output file isn't on my laptop yet</summary><div><p>Files written by a job take a minute or two to appear in <code>~/aws/workspace</code>.</p></div></details>
+      <details><summary>saturn asks me to sign in</summary><div><p>Your weekly sign-in expired. Run <code>saturn login</code>, then carry on.</p></div></details>
+    </section>
+
+    <section id="cheatsheet">
+      <h2>Cheat sheet</h2>
+      <div class="cheat">
+        <div><code>saturn login</code><span>Sign in (lasts 7 days)</span></div>
+        <div><code>saturn connect</code><span>Mounts, tunnel, environment</span></div>
+        <div><code>saturn status</code><span>What's connected</span></div>
+        <div><code>saturn disconnect</code><span>Undo connect</span></div>
+        <div><code>saturn run &lt;path&gt;</code><span>Run a .R, .jl or .py on AWS</span></div>
+        <div><code>CPU=… MEMORY=… SPOT=1</code><span>Machine size, cheaper Spot</span></div>
+        <div><code>saturn list</code><span>Running jobs</span></div>
+        <div><code>saturn logs &lt;id&gt;</code><span>Follow a job again</span></div>
+        <div><code>saturn stop &lt;id&gt;</code><span>Stop a job</span></div>
+        <div><code>saturn costs</code><span>Spending per month and person</span></div>
+        <div><code>saturn docs</code><span>Open this guide</span></div>
+      </div>
+    </section>
+    <section id="appendix-mariadb">
+      <h2>Appendix: the MariaDB database</h2>
+      <p>Use the <a href="#datasets">datasets</a> for everyday work. The <code>mayin-data</code> MariaDB database (on Amazon RDS) is still there for tables that aren&#8217;t in the datasets.</p>
       <p>Jobs and laptops share one login, <code>aws_jobs</code>, which can only <b>read</b> the <code>mayin-data</code> MariaDB databases (<code>fld</code>, <code>hhd</code>, <code>maps</code>, …). Save results as files in the workspace. The password reaches your code through <code>DB_PASSWORD</code>, so it never appears in a script.</p>
+      <div class="table"><table>
+        <thead><tr><th>Variable</th><th>In a job</th><th>On your laptop</th></tr></thead>
+        <tbody>
+          <tr><td><code>DB_HOST</code>, <code>DB_PORT</code></td><td>the database</td><td><code>127.0.0.1</code> and the tunnel port</td></tr>
+          <tr><td><code>DB_USER</code>, <code>DB_PASSWORD</code></td><td colspan="2">the shared, read-only <code>aws_jobs</code> login</td></tr>
+        </tbody>
+      </table></div>
       <div class="tabs" data-group="lang">
         <div class="tablist" role="tablist" aria-label="Language">
           <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
@@ -551,46 +589,12 @@ con.close()</pre></div>
         </div>
       </div>
       <p>The database only accepts encrypted connections, which is what the SSL options above ask for. Other clients (DBeaver, TablePlus, <code>mysql</code>) work too: host <code>127.0.0.1</code>, port <code>3306</code>, user and password from <code>~/.config/saturn-v/env</code>.</p>
-      <div class="note tip"><span class="tag">Faster</span><p>For CPHS household data, the <a href="#datasets">Parquet datasets</a> are much faster than the database.</p></div>
-    </section>
-
-    <section id="jobs">
-      <h2>Jobs and costs</h2>
-      <div class="code"><pre><span class="p">$ </span>saturn list                 <span class="c"># running jobs</span>
-<span class="p">$ </span>saturn logs &lt;task-id&gt;       <span class="c"># follow a job's output again</span>
-<span class="p">$ </span>saturn stop &lt;task-id&gt;
-<span class="p">$ </span>saturn costs                <span class="c"># spending per month and person</span></pre></div>
-      <p>When a job ends, a notice goes to the team's Mattermost channel with who ran it, the script, the machine, the runtime and the cost. It comes from AWS, so it arrives even if your laptop is closed. Every Monday at 9:00 a summary of the past week follows, with jobs, failures, hours and spend per person.</p>
-    </section>
-
-    <section id="trouble">
-      <h2>When something's off</h2>
-      <details><summary><code>echo $DB_HOST</code> prints nothing</summary><div><p>This terminal was opened before <code>saturn connect</code>. Open a new one, or run <code>eval "$(saturn connect)"</code>. In RStudio, run <code>readRenviron("~/.config/saturn-v/env")</code>.</p></div></details>
-      <details><summary>The job doesn't have a package I installed</summary><div><p>R: run <code>renv::snapshot()</code> after <code>install.packages()</code>, and check with <code>renv::status()</code>. Julia: start Julia with <code>--project=.</code> before <code>]add</code>; <code>]status</code> shows which project is active. Python: add it to the header, <code>pyproject.toml</code> or <code>requirements.txt</code>. See <a href="#packages">Packages</a>.</p></div></details>
-      <details><summary>"R 4.x is not available on AWS"</summary><div><p>Your <code>renv.lock</code> was made with an R version AWS doesn't offer. Upgrade R on your laptop, then run <code>renv::update()</code> and <code>renv::snapshot()</code>.</p></div></details>
       <details><summary>"Connections using insecure transport are prohibited"</summary><div><p>Add the SSL option: <code>client.flag = RMariaDB::CLIENT_SSL</code> in R, <code>ssl_mode=:required</code> in Julia.</p></div></details>
       <details><summary>Port 3306 is already in use</summary><div><p>Something on your laptop (a local MySQL, say) uses it. Connect with <code>DB_LOCAL_PORT=13306 saturn connect</code>; <code>DB_PORT</code> then says 13306.</p></div></details>
-      <details><summary>A job's output file isn't on my laptop yet</summary><div><p>Files written by a job take a minute or two to appear in <code>~/aws/workspace</code>.</p></div></details>
-      <details><summary>saturn asks me to sign in</summary><div><p>Your weekly sign-in expired. Run <code>saturn login</code>, then carry on.</p></div></details>
-    </section>
-
-    <section id="cheatsheet">
-      <h2>Cheat sheet</h2>
-      <div class="cheat">
-        <div><code>saturn login</code><span>Sign in (lasts 7 days)</span></div>
-        <div><code>saturn connect</code><span>Mounts, tunnel, environment</span></div>
-        <div><code>saturn status</code><span>What's connected</span></div>
-        <div><code>saturn disconnect</code><span>Undo connect</span></div>
-        <div><code>saturn run &lt;path&gt;</code><span>Run a .R, .jl or .py on AWS</span></div>
-        <div><code>CPU=… MEMORY=… SPOT=1</code><span>Machine size, cheaper Spot</span></div>
-        <div><code>saturn list</code><span>Running jobs</span></div>
-        <div><code>saturn logs &lt;id&gt;</code><span>Follow a job again</span></div>
-        <div><code>saturn stop &lt;id&gt;</code><span>Stop a job</span></div>
-        <div><code>saturn costs</code><span>Spending per month and person</span></div>
-        <div><code>saturn docs</code><span>Open this guide</span></div>
-      </div>
+      <p>The tunnel goes through a small server on AWS, which <code>saturn connect</code> starts if it&#8217;s stopped.</p>
       <footer>The full reference is the <a href="https://github.com/xKDR/saturn-v">saturn-v README</a>. Questions go to the team's Mattermost channel.</footer>
     </section>
+
   </main>
 </div>
 

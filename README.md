@@ -8,7 +8,7 @@ Run heavy Julia, R and Python jobs on AWS from your laptop, with the same code i
 
 You work on your laptop as usual. When a job needs more than your laptop has, `saturn run` sends it to a machine on AWS Fargate (up to 32 cores and 244 GB of memory), streams its output to your terminal, and records what it cost. Your laptop can sleep or disconnect while the job runs.
 
-`saturn connect` gives your laptop the same setup a job has: the shared workspace, the satellite data and the database, under the same environment variable names. A script you try locally runs unchanged on AWS.
+`saturn connect` gives your laptop the same setup a job has: the shared workspace, the satellite data and the [datasets](#datasets-duckdb), under the same environment variable names. A script you try locally runs unchanged on AWS.
 
 The AWS side (buckets, cluster, permissions) is managed in [xKDR/AWS-Server](https://github.com/xKDR/AWS-Server).
 
@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | sh
 
 Then open a new terminal. The installer:
 
-- installs the tools saturn uses: the AWS CLI, rclone (for the mounts) and AWS's Session Manager plugin (for the database tunnel). On a Mac through [Homebrew](https://brew.sh) (install that first if you don't have it); on Linux into `~/.local`, without sudo;
+- installs the tools saturn uses: the AWS CLI, rclone (for the mounts) and AWS's Session Manager plugin (for the MariaDB tunnel; see the [appendix](#appendix-the-mariadb-database)). On a Mac through [Homebrew](https://brew.sh) (install that first if you don't have it); on Linux into `~/.local`, without sudo;
 - puts saturn in `~/.saturn-v` and on your PATH;
 - adds two lines to your shell's startup file (marked `# saturn-v`): `~/.local/bin` on the PATH, and the job environment while you're connected.
 
@@ -45,8 +45,8 @@ saturn connect
 
 `saturn login` opens your browser to sign in at xKDR's AWS access portal, with your password and MFA. A sign-in lasts **7 days**; saturn says when it's time to sign in again. `saturn connect` then:
 
-- mounts the shared workspace at `~/aws/workspace`, and the satellite data and the [datasets](#datasets-parquet), read-only, at `~/aws/satellite` and `~/aws/datasets`;
-- opens a tunnel to the database on `127.0.0.1:3306`;
+- mounts the shared workspace at `~/aws/workspace`, and the satellite data and the [datasets](#datasets-duckdb), read-only, at `~/aws/satellite` and `~/aws/datasets`;
+- opens a tunnel to the MariaDB database on `127.0.0.1:3306` (see the [appendix](#appendix-the-mariadb-database));
 - creates **your own folder** in the workspace, `~/aws/workspace/<your user name>` (see [Organising the workspace](#organising-the-workspace));
 - writes the job environment to `~/.config/saturn-v/env` (readable only by you), which new terminals load;
 - keeps the tunnel healthy in the background, reopening it if it drops.
@@ -84,8 +84,6 @@ These variables are set in every job, and on your laptop after `saturn connect`:
 | `SATELLITE` | `/vsis3/<bucket>` (read straight from S3) | `~/aws/satellite` |
 | `DATASETS` | `s3://<bucket>` | `~/aws/datasets` |
 | `DATA_BUCKET`, `AWS_REGION` | the satellite bucket and AWS region | the same |
-| `DB_HOST`, `DB_PORT` | the database | `127.0.0.1` and the tunnel port |
-| `DB_USER`, `DB_PASSWORD` | the shared `aws_jobs` login | the same |
 
 So build paths and connections from them, never from fixed paths:
 
@@ -159,7 +157,7 @@ This creates `renv.lock`, a `renv/` folder and an `.Rprofile`. From now on, R st
 **Add a package:**
 
 ```r
-install.packages("RMariaDB")
+install.packages("fixest")
 renv::snapshot()
 ```
 
@@ -191,7 +189,7 @@ The first run installs the packages (pre-built for Linux, so usually a minute or
 **Is a package already in the image?** One way to check:
 
 ```r
-cat(requireNamespace("RMariaDB", quietly = TRUE), "\n")
+cat(requireNamespace("fixest", quietly = TRUE), "\n")
 ```
 
 saved as `check.R` and run with `saturn run <you>/check.R` (about a cent).
@@ -225,15 +223,15 @@ saturn costs
 
 When any job ends, its cost is recorded and a summary (who, script, machine, runtime, cost) is posted to the team's Mattermost channel. This happens in AWS, so it works even if your laptop is closed.
 
-## Datasets (Parquet)
+## Datasets (DuckDB)
 
-Large datasets are kept as Parquet files in a read-only datasets bucket, laid out for fast filtering. Querying them with DuckDB is much faster than the database: a job pulled all-India CPHS income, consumption and member income in under 2 minutes, where the same queries against MariaDB take hours.
+This is where to get data. The datasets are Parquet files in a read-only bucket, laid out for fast filtering, and you query them with DuckDB: a job pulled all-India CPHS income, consumption and member income in under 2 minutes.
 
 | Dataset | What | Partitioned by | Sorted by |
 | --- | --- | --- | --- |
 | `hhd` | CPHS household survey: `hh_consumption_monthly`, `hh_consumption_weekly`, `hh_income_monthly`, `member_income_monthly`, `people_of_india_wave`, `aspirational_wave`, `hh_char` | `YEAR`, `STATE` | `MONTH_SLOT_DATE`, `DISTRICT` |
 
-`DATASETS` is `s3://<bucket>` in a job and `~/aws/datasets` (a read-only mount) on your laptop, so the same code works in both. The tables have the same names and columns as in the database; `MONTH_SLOT_DATE` is a date and `YEAR` a whole number.
+`DATASETS` is `s3://<bucket>` in a job and `~/aws/datasets` (a read-only mount) on your laptop, so the same code works in both. The tables have the same names and columns as in the MariaDB database they were copied from; `MONTH_SLOT_DATE` is a date and `YEAR` a whole number.
 
 Connect with saturn's helper, then query the tables by name, with SQL or dplyr. Do this once at the top of a script; the same lines work on your laptop and in a job.
 
@@ -275,11 +273,25 @@ After that, query the tables with SQL as before, or with dplyr: `tbl(con, "hh_in
 - **Filter on `YEAR` and `STATE`** whenever you can: those skip whole folders. Filters on `MONTH_SLOT_DATE` and `DISTRICT` are fast too.
 - **Do the heavy work in SQL** (joins, date conversions, sorting), not in R, Julia or Python afterwards: DuckDB uses every core. Pull only the result into R, Julia or Python.
 - **On your laptop,** a query reads only the columns and folders it needs, but all-India pulls of many columns are best run as a job.
-- The `hhd` data is a copy of the database as of 27 Oct 2026.
+- The `hhd` data is a copy of the MariaDB `hhd` database as of 27 Oct 2026. For tables that aren't in the datasets, see the [appendix](#appendix-the-mariadb-database).
 
-## The database
+## Good to know
+
+- The workspace is shared by everyone. Keep to your own folder; if two people save the same file, the last save wins.
+- Folders you create in the workspace (in Finder, Terminal, R or Julia) show up in jobs, even while empty. This needs the current `saturn`: after `git pull`, run `saturn disconnect` and `saturn connect` once. Scripts are still safest creating their own output folders, e.g. `dir.create("../DOC/IMAGES", recursive = TRUE, showWarnings = FALSE)`.
+
+## Appendix: the MariaDB database
+
+Use the [datasets](#datasets-duckdb) for everyday work. The `mayin-data` MariaDB database (on Amazon RDS) is still there for tables that aren't in the datasets.
 
 Jobs and laptops share one database login (`aws_jobs`). It can **only read** the `mayin-data` MariaDB databases (`fld`, `hhd`, `maps`, `tmp`, ...): queries and views, but no inserts, updates, deletes or table changes. Save results to files in the workspace instead. The password is kept in AWS Secrets Manager and reaches your code through `DB_PASSWORD`, so it never appears in a script.
+
+These variables are set in every job, and on your laptop after `saturn connect`:
+
+| Variable | In a job | On your laptop |
+| --- | --- | --- |
+| `DB_HOST`, `DB_PORT` | the database | `127.0.0.1` and the tunnel port |
+| `DB_USER`, `DB_PASSWORD` | the shared `aws_jobs` login | the same |
 
 R (add `RMariaDB` to the project's `renv.lock`):
 
@@ -310,8 +322,4 @@ If `echo $DB_HOST` prints nothing, this terminal doesn't have the variables: it 
 
 If something on your laptop already uses port 3306 (a local MySQL, say), connect with `DB_LOCAL_PORT=13306 saturn connect`; `DB_PORT` then says 13306.
 
-## Good to know
-
-- The workspace is shared by everyone. Keep to your own folder; if two people save the same file, the last save wins.
-- Folders you create in the workspace (in Finder, Terminal, R or Julia) show up in jobs, even while empty. This needs the current `saturn`: after `git pull`, run `saturn disconnect` and `saturn connect` once. Scripts are still safest creating their own output folders, e.g. `dir.create("../DOC/IMAGES", recursive = TRUE, showWarnings = FALSE)`.
-- The database tunnel goes through a small server on AWS, which `saturn connect` starts if it's stopped.
+The tunnel goes through a small server on AWS, which `saturn connect` starts if it's stopped.
