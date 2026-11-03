@@ -67,6 +67,8 @@ Everyone shares one workspace, so keep to this layout:
 | `shared/<project>/` | work several people use; agree on the folder name with them |
 | `db/`, `costs/`, `.julia/`, `.R/` | used by saturn itself; leave them alone |
 
+Anything else at the top level shows up in the Monday summary as "not in anyone's folder".
+
 In scripts, write outputs relative to `MY_WORKSPACE` (or to the script's own folder), never to a fixed path:
 
 ```r
