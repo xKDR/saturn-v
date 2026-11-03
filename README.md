@@ -235,9 +235,17 @@ This is where to get data. The datasets are Parquet files in a read-only bucket,
 
 `DATASETS` is `s3://<bucket>` in a job and `~/aws/datasets` (a read-only mount) on your laptop, so the same code works in both. The tables have the same names and columns as in the MariaDB database they were copied from; `MONTH_SLOT_DATE` is a date and `YEAR` a whole number.
 
-Connect with saturn's helper, then query the tables by name, with SQL or dplyr. Do this once at the top of a script; the same lines work on your laptop and in a job.
+**Install DuckDB first.** It's what reads the datasets, and it isn't installed with saturn:
 
-R (needs the `duckdb` package):
+| | On your laptop (once) | In a job |
+| --- | --- | --- |
+| R | `install.packages(c("duckdb", "dbplyr"))` | Already in the R image (with DBI, dplyr, dbplyr and arrow). With an `renv.lock`, run `renv::snapshot()` after installing |
+| Julia | `]add DuckDB DBInterface DataFrames`, in the project (`julia --project=.`) | Comes from the project's `Project.toml`; the Julia image has no packages |
+| Python | `uv add --script analysis.py duckdb pandas` (or add them to `pyproject.toml` / `requirements.txt`) | Comes from the same list |
+
+Then connect with saturn's helper and query the tables by name, with SQL or dplyr. Do this once at the top of a script; the same lines work on your laptop and in a job.
+
+R:
 
 ```r
 source(Sys.getenv("SATURN_R"))
@@ -249,7 +257,7 @@ df <- DBI::dbGetQuery(con, "SELECT YEAR, AVG(TOT_INC) AS avg_income
                             GROUP BY YEAR ORDER BY YEAR")
 ```
 
-Julia (add `DuckDB`, `DBInterface` and `DataFrames` to the `Project.toml`):
+Julia:
 
 ```julia
 include(ENV["SATURN_JL"])
@@ -258,7 +266,7 @@ con = saturn_db("hhd")
 df = DBInterface.execute(con, "SELECT * FROM member_income_monthly WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10") |> DataFrame
 ```
 
-Python (add `duckdb` to the script's packages):
+Python:
 
 ```python
 import os

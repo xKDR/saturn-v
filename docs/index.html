@@ -460,6 +460,29 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
           <tr><td><code>hhd</code></td><td>CPHS: <code>hh_income_monthly</code>, <code>hh_consumption_monthly</code>, <code>hh_consumption_weekly</code>, <code>member_income_monthly</code>, <code>people_of_india_wave</code>, <code>aspirational_wave</code>, <code>hh_char</code></td><td><code>YEAR</code>, <code>STATE</code></td></tr>
         </tbody>
       </table></div>
+      <h3>Install DuckDB first</h3>
+      <p>DuckDB is what reads the datasets, and it isn&#8217;t installed with saturn. Install it on your laptop once; jobs need it too:</p>
+      <div class="tabs" data-group="lang">
+        <div class="tablist" role="tablist" aria-label="Language">
+          <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
+          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia</button>
+          <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
+        </div>
+        <div class="tabpanel" data-key="r" role="tabpanel">
+          <div class="code"><pre>install.packages(c("duckdb", "dbplyr"))</pre></div>
+          <p>Jobs already have them: the R image includes duckdb, DBI, dplyr, dbplyr and arrow. If your project uses renv, run <code>renv::snapshot()</code> after installing.</p>
+        </div>
+        <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
+          <div class="code"><pre><span class="p">$ </span>julia --project=.
+julia&gt; ]add DuckDB DBInterface DataFrames</pre></div>
+          <p>This records them in the project&#8217;s <code>Project.toml</code>, which is where the job gets them: the Julia image has no packages of its own.</p>
+        </div>
+        <div class="tabpanel" data-key="python" role="tabpanel" hidden>
+          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py duckdb pandas</pre></div>
+          <p>The job installs what the script lists. In a project, add them to <code>pyproject.toml</code> or <code>requirements.txt</code> instead.</p>
+        </div>
+      </div>
+      <h3>Connect and query</h3>
       <p>saturn's helper connects you with one line and makes every table available under its database name. The same lines work on your laptop and in a job.</p>
       <div class="tabs" data-group="lang">
         <div class="tablist" role="tablist" aria-label="Language">
@@ -468,8 +491,7 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
           <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
         </div>
         <div class="tabpanel" data-key="r" role="tabpanel">
-          <div class="code"><pre><span class="c"># needs the duckdb package</span>
-source(Sys.getenv("SATURN_R"))
+          <div class="code"><pre>source(Sys.getenv("SATURN_R"))
 con &lt;- saturn_db("hhd")
 
 df &lt;- DBI::dbGetQuery(con, "
@@ -482,8 +504,7 @@ df &lt;- DBI::dbGetQuery(con, "
 tbl(con, "hh_income_monthly") |&gt; filter(STATE == "Karnataka")</pre></div>
         </div>
         <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
-          <div class="code"><pre><span class="c"># add DuckDB, DBInterface and DataFrames to the Project.toml</span>
-include(ENV["SATURN_JL"])
+          <div class="code"><pre>include(ENV["SATURN_JL"])
 con = saturn_db("hhd")
 
 df = DBInterface.execute(con, """
@@ -491,8 +512,7 @@ df = DBInterface.execute(con, """
   WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10""") |&gt; DataFrame</pre></div>
         </div>
         <div class="tabpanel" data-key="python" role="tabpanel" hidden>
-          <div class="code"><pre><span class="c"># add duckdb (and pandas for .df()) to the script's packages</span>
-import os
+          <div class="code"><pre>import os
 exec(open(os.environ["SATURN_PY"]).read())
 con = saturn_db("hhd")
 
