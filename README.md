@@ -240,16 +240,6 @@ This is where to get data. The datasets are proprietary, so they can only be *qu
 
 The tables have the same names and columns as in the MariaDB database they were copied from, in lower case (`prowess_sa_annual_assets_oldschedule6_disclosure`).
 
-**Map shapes** are in the `shape` column, in MariaDB's format: 4 bytes, then the standard WKB. Skip the 4 bytes. The coordinates are latitude and longitude (WGS 84). In R, with sf:
-
-```r
-s <- DBI::dbGetQuery(maps, "SELECT st_nm, shape FROM states")
-s$geometry <- sf::st_as_sfc(structure(lapply(s$shape, function(b) as.raw(b)[-(1:4)]), class = "WKB"), crs = 4326)
-s <- sf::st_as_sf(s[c("st_nm", "geometry")])
-```
-
-In Python, `shapely.from_wkb([b[4:] for b in df["shape"]])`. In SQL, `ST_GeomFromBinary(substr(shape, 5))`, e.g. `ST_Area(...)` or `ST_Contains(...)`.
-
 **Install the connector's packages once** (no DuckDB needed):
 
 | | On your laptop (once) | In a job |
@@ -294,6 +284,38 @@ df = con.sql("SELECT * FROM member_income_monthly WHERE state = 'Karnataka' AND 
 ```
 
 `DBI::dbListTables(con)` (R), `saturn_tables(con)` (Julia) and `con.tables()` (Python) list the tables. A query can use another dataset's tables by name: connected to `hhd`, `SELECT company_name FROM fld.identity WHERE co_code = 11` works.
+
+**Maps.** The `maps` tables keep each boundary in a `shape` column, in MariaDB's format: 4 bytes, then the standard WKB. Skip the 4 bytes. The coordinates are latitude and longitude (WGS 84).
+
+R, with sf (`install.packages("sf")`):
+
+```r
+source(Sys.getenv("SATURN_R"))
+maps <- saturn_db("maps")
+
+s <- DBI::dbGetQuery(maps, "SELECT st_nm, shape FROM states")
+s$geometry <- sf::st_as_sfc(structure(lapply(s$shape, function(b) as.raw(b)[-(1:4)]), class = "WKB"), crs = 4326)
+s <- sf::st_as_sf(s[c("st_nm", "geometry")])
+plot(sf::st_geometry(s))
+```
+
+Python, with shapely (`uv add shapely`):
+
+```python
+import os, shapely
+exec(open(os.environ["SATURN_PY"]).read())
+maps = saturn_db("maps")
+
+df = maps.sql("SELECT st_nm, shape FROM states").df()
+df["geometry"] = shapely.from_wkb([b[4:] for b in df["shape"]])
+```
+
+In any language, including Julia, SQL can work with the shapes directly: `ST_GeomFromBinary(substr(shape, 5))` turns one into a geometry. Which state is Bengaluru in?
+
+```sql
+SELECT st_nm FROM states
+WHERE ST_Contains(ST_GeomFromBinary(substr(shape, 5)), ST_Point(77.59, 12.97))   -- Karnataka
+```
 
 The SQL is Athena's (Trino), close to what you know. The differences that come up:
 

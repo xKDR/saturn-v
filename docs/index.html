@@ -463,17 +463,6 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
         </tbody>
       </table></div>
       <p>Table and column names are as in the MariaDB databases, in lower case.</p>
-      <p><b>Map shapes</b> are in the <code>shape</code> column, in MariaDB&#8217;s format: 4 bytes, then the standard WKB. Skip the 4 bytes. The coordinates are latitude and longitude (WGS 84).</p>
-      <div class="code"><pre><span class="c"># R, with sf</span>
-s &lt;- DBI::dbGetQuery(maps, "SELECT st_nm, shape FROM states")
-s$geometry &lt;- sf::st_as_sfc(structure(lapply(s$shape, function(b) as.raw(b)[-(1:4)]), class = "WKB"), crs = 4326)
-s &lt;- sf::st_as_sf(s[c("st_nm", "geometry")])
-
-<span class="c"># Python, with shapely</span>
-shapely.from_wkb([b[4:] for b in df["shape"]])
-
-<span class="c"># SQL</span>
-SELECT st_nm, ST_Area(ST_GeomFromBinary(substr(shape, 5))) FROM states</pre></div>
       <h3>Install the connector once</h3>
       <p>You don&#8217;t need DuckDB. Install these on your laptop once; jobs need them too:</p>
       <div class="tabs" data-group="lang">
@@ -540,6 +529,44 @@ df = con.sql("""
 con.tables()</pre></div>
         </div>
       </div>
+      <h3>Maps</h3>
+      <p>The <code>maps</code> tables keep each boundary in a <code>shape</code> column, in MariaDB&#8217;s format: 4 bytes, then the standard WKB. Skip the 4 bytes. The coordinates are latitude and longitude (WGS 84).</p>
+      <div class="tabs" data-group="lang">
+        <div class="tablist" role="tablist" aria-label="Language">
+          <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
+          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia</button>
+          <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
+        </div>
+        <div class="tabpanel" data-key="r" role="tabpanel">
+          <p>With sf (<code>install.packages("sf")</code>):</p>
+          <div class="code"><pre>source(Sys.getenv("SATURN_R"))
+maps &lt;- saturn_db("maps")
+
+s &lt;- DBI::dbGetQuery(maps, "SELECT st_nm, shape FROM states")
+s$geometry &lt;- sf::st_as_sfc(structure(lapply(s$shape, function(b) as.raw(b)[-(1:4)]), class = "WKB"), crs = 4326)
+s &lt;- sf::st_as_sf(s[c("st_nm", "geometry")])
+plot(sf::st_geometry(s))</pre></div>
+        </div>
+        <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
+          <p>Work with the shapes in SQL, which runs in AWS:</p>
+          <div class="code"><pre>include(ENV["SATURN_JL"])
+maps = saturn_db("maps")
+
+df = DBInterface.execute(maps, """
+  SELECT st_nm FROM states
+  WHERE ST_Contains(ST_GeomFromBinary(substr(shape, 5)), ST_Point(77.59, 12.97))""") |&gt; DataFrame   <span class="c"># Karnataka</span></pre></div>
+        </div>
+        <div class="tabpanel" data-key="python" role="tabpanel" hidden>
+          <p>With shapely (<code>uv add shapely</code>):</p>
+          <div class="code"><pre>import os, shapely
+exec(open(os.environ["SATURN_PY"]).read())
+maps = saturn_db("maps")
+
+df = maps.sql("SELECT st_nm, shape FROM states").df()
+df["geometry"] = shapely.from_wkb([b[4:] for b in df["shape"]])</pre></div>
+        </div>
+      </div>
+      <p>In any language, SQL can work with the shapes directly: <code>ST_GeomFromBinary(substr(shape, 5))</code> turns one into a geometry, for <code>ST_Contains</code>, <code>ST_Intersects</code>, <code>ST_Area</code> and the like.</p>
       <h3>The SQL</h3>
       <p>It&#8217;s Athena&#8217;s (Trino), close to what you know. The differences that come up:</p>
       <ul>
