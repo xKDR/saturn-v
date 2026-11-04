@@ -79,7 +79,11 @@ type deployment struct {
 	SecurityGroup   string   `json:"security_group"`
 	LogGroup        string   `json:"log_group"`
 	WorkspaceBucket string   `json:"workspace_bucket"`
-	Languages       map[string]struct {
+	CostsBucket     string   `json:"costs_bucket"`
+	// Querying the datasets through Athena (xKDR/AWS-Server query.tf).
+	AthenaWorkgroup     string `json:"athena_workgroup"`
+	AthenaResultsBucket string `json:"athena_results_bucket"`
+	Languages           map[string]struct {
 		TaskDefinition string            `json:"task_definition"`
 		Container      string            `json:"container"`
 		Versions       map[string]string `json:"versions"`

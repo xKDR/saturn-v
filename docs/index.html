@@ -181,7 +181,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <li><a class="item" href="#same-code">Same code everywhere</a></li>
       <li><a class="item" href="#run">Running a job</a></li>
       <li><a class="item" href="#packages">Packages</a></li>
-      <li><a class="item" href="#datasets">Data (DuckDB)</a></li>
+      <li><a class="item" href="#datasets">Data</a></li>
       <li><a class="item" href="#jobs">Jobs and costs</a></li>
       <li><a class="item" href="#trouble">When something's off</a></li>
       <li><a class="item" href="#cheatsheet">Cheat sheet</a></li>
@@ -225,7 +225,6 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
           <ul>
             <li><span>Shared workspace</span><span>~/aws/workspace</span></li>
             <li><span>Satellite data (read-only)</span><span>~/aws/satellite</span></li>
-            <li><span>Parquet datasets (read-only)</span><span>~/aws/datasets</span></li>
           </ul>
         </div>
         <div class="arrow"><b>⇄</b>same names</div>
@@ -254,7 +253,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <p>It&#8217;s safe to run again. To read it first, replace <code>| sh</code> with <code>| less</code>.</p>
       <ul>
         <li><b>Linux:</b> the mounts need FUSE (<code>sudo apt install fuse3</code>); most desktops have it, and the installer says if it&#8217;s missing.</li>
-        <li><b>Updates:</b> <code>saturn update</code>, then <code>saturn disconnect</code> and <code>saturn connect</code> if you&#8217;re connected.</li>
+        <li><b>Updates:</b> when a new version is out, saturn asks you to run <code>saturn update</code> before anything else (<code>disconnect</code>, <code>stop</code> and <code>docs</code> still work). It reconnects you with the new version if you were connected.</li>
       </ul>
     </section>
 
@@ -264,7 +263,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
 <span class="p">$ </span>saturn connect</pre></div>
       <p><code>saturn connect</code> does four things:</p>
       <ul>
-        <li>mounts the shared workspace at <code>~/aws/workspace</code>, and the satellite data and datasets (read-only) at <code>~/aws/satellite</code> and <code>~/aws/datasets</code>;</li>
+        <li>mounts the shared workspace at <code>~/aws/workspace</code>, and the satellite data (read-only) at <code>~/aws/satellite</code>;</li>
         <li>opens a tunnel to the MariaDB database on <code>127.0.0.1:3306</code> (see the <a href="#appendix-mariadb">appendix</a>), and reopens it in the background if it drops;</li>
         <li>creates your own folder, <code>~/aws/workspace/&lt;your user name&gt;</code>;</li>
         <li>writes the job's environment variables to <code>~/.config/saturn-v/env</code>, which new terminals load;</li>
@@ -281,7 +280,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
         <tbody>
           <tr><td><code>&lt;your user name&gt;/</code></td><td>Your own work. <code>MY_WORKSPACE</code> points here, on your laptop and in your jobs.</td></tr>
           <tr><td><code>shared/&lt;project&gt;/</code></td><td>Work several people use. Agree on the folder name with them.</td></tr>
-          <tr><td><code>db/</code>, <code>costs/</code>, <code>.julia/</code>, <code>.R/</code></td><td>Used by saturn itself. Leave them alone.</td></tr>
+          <tr><td><code>db/</code>, <code>.julia/</code>, <code>.R/</code></td><td>Used by saturn itself. Leave them alone.</td></tr>
         </tbody>
       </table></div>
       <p>If two people save the same file, the last save wins. Anything a job writes appears on your laptop within a minute or two. Anything else at the top level shows up in the Monday summary as &#8220;not in anyone&#8217;s folder&#8221;.</p>
@@ -296,7 +295,6 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
           <tr><td><code>WORKSPACE</code></td><td><code>/workspace</code></td><td><code>~/aws/workspace</code></td></tr>
           <tr><td><code>MY_WORKSPACE</code></td><td><code>/workspace/&lt;you&gt;</code></td><td><code>~/aws/workspace/&lt;you&gt;</code></td></tr>
           <tr><td><code>SATELLITE</code></td><td><code>/vsis3/&lt;bucket&gt;</code>, read straight from S3</td><td><code>~/aws/satellite</code></td></tr>
-          <tr><td><code>DATASETS</code></td><td><code>s3://&lt;bucket&gt;</code></td><td><code>~/aws/datasets</code></td></tr>
         </tbody>
       </table></div>
       <h3>Reading a satellite file</h3>
@@ -334,16 +332,18 @@ out = os.path.join(os.environ["MY_WORKSPACE"], "project", "results.parquet")</pr
       <div class="code"><pre><span class="p">$ </span>saturn run &lt;you&gt;/project/main.jl
 <span class="p">$ </span>saturn run &lt;you&gt;/project/analysis.R
 <span class="p">$ </span>saturn run &lt;you&gt;/project/analysis.py
-<span class="p">$ </span>CPU=16384 MEMORY=65536 saturn run &lt;you&gt;/project/main.jl     <span class="c"># bigger machine</span>
+<span class="p">$ </span>saturn run --size large &lt;you&gt;/project/main.jl              <span class="c"># bigger machine</span>
 <span class="p">$ </span>saturn run -e START=2014-01 &lt;you&gt;/project/main.jl           <span class="c"># extra variable for the job</span>
 <span class="p">$ </span>SPOT=1 saturn run &lt;you&gt;/project/main.jl                     <span class="c"># ~70% cheaper, may be interrupted</span></pre></div>
       <p>The job starts in about a minute and its output streams to your terminal. Press Ctrl-C to stop watching: the job keeps running, and your laptop can sleep or disconnect.</p>
       <div class="table"><table>
-        <thead><tr><th>Machine</th><th>Settings</th><th>About per hour</th></tr></thead>
+        <thead><tr><th><code>--size</code></th><th>Machine</th><th>About per hour</th></tr></thead>
         <tbody>
-          <tr><td>Default</td><td>4 cores, 16 GB</td><td class="num">$0.25</td></tr>
-          <tr><td>Large</td><td><code>CPU=16384 MEMORY=122880</code> (16 cores, 120 GB)</td><td class="num">$1.25</td></tr>
-          <tr><td>Largest</td><td><code>CPU=32768 MEMORY=249856</code> (32 cores, 244 GB)</td><td class="num">$2.50</td></tr>
+          <tr><td><code>small</code></td><td>1 core, 4 GB</td><td class="num">$0.06</td></tr>
+          <tr><td><code>medium</code> (default)</td><td>4 cores, 16 GB</td><td class="num">$0.25</td></tr>
+          <tr><td><code>large</code></td><td>8 cores, 60 GB</td><td class="num">$0.62</td></tr>
+          <tr><td><code>xlarge</code></td><td>16 cores, 120 GB</td><td class="num">$1.24</td></tr>
+          <tr><td><code>max</code></td><td>32 cores, 244 GB</td><td class="num">$2.50</td></tr>
         </tbody>
       </table></div>
       <p>You pay per second, only while a job runs, with a one-minute minimum. A quick check job costs about half a cent.</p>
@@ -409,7 +409,7 @@ renv::restore()                   <span class="c"># install what renv.lock lists
           <h3>Start a project (once)</h3>
           <div class="code"><pre><span class="p">$ </span>cd ~/aws/workspace/&lt;you&gt;/project
 <span class="p">$ </span>julia --project=.
-julia&gt; ]add DuckDB DataFrames CSV</pre></div>
+julia&gt; ]add AWS Parquet2 DataFrames CSV</pre></div>
           <p><code>--project=.</code> makes this folder the active project, so <code>add</code> writes <code>Project.toml</code> (the packages you use) and <code>Manifest.toml</code> (exact versions of everything). Keep both in the folder: the job installs from the Manifest.</p>
 
           <h3>Run with the project</h3>
@@ -418,14 +418,14 @@ julia&gt; ]add DuckDB DataFrames CSV</pre></div>
           <p>A <code>Project.toml</code> in a folder above the script works too, so several scripts can share one project.</p>
 
           <h3>The usual mistake</h3>
-          <p>Adding a package after starting plain <code>julia</code> (without <code>--project</code>) puts it in your personal environment, not the project's. It works on your laptop but the job fails with <i>Package DuckDB not found in current path</i>. Check which project is active, and what it has:</p>
+          <p>Adding a package after starting plain <code>julia</code> (without <code>--project</code>) puts it in your personal environment, not the project's. It works on your laptop but the job fails with <i>Package AWS not found in current path</i>. Check which project is active, and what it has:</p>
           <div class="code"><pre>julia&gt; ]status          <span class="c"># first line shows the active Project.toml</span>
 julia&gt; ]activate .      <span class="c"># switch to this folder's project if it's the wrong one</span></pre></div>
 
           <h3>Other things you'll do</h3>
           <div class="code"><pre>julia&gt; ]update               <span class="c"># newer versions of everything</span>
 julia&gt; ]rm CSV
-julia&gt; ]add DuckDB@1.2       <span class="c"># a specific version</span>
+julia&gt; ]add DataFrames@1.7    <span class="c"># a specific version</span>
 julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lists, e.g. in a colleague's project</span></pre></div>
           <p>Packages are cached in the workspace, so only a job's first run installs them. Julia uses every core the job has.</p>
         </div>
@@ -434,17 +434,17 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
           <p>Python jobs run with <a href="https://docs.astral.sh/uv/">uv</a>, which installs your packages (and the Python version you ask for; 3.13 otherwise) in a few seconds at the start of every job. Install it on your laptop with <code>brew install uv</code>.</p>
 
           <h3>A single script: list packages in its header</h3>
-          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py pandas duckdb</pre></div>
+          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py pandas boto3 pyarrow</pre></div>
           <p>That writes this at the top of the script, which is all the job needs:</p>
           <div class="code"><pre># /// script
-# dependencies = ["pandas", "duckdb"]
+# dependencies = ["pandas", "boto3", "pyarrow"]
 # ///</pre></div>
           <p>Run it with <code>uv run analysis.py</code> on your laptop and <code>saturn run &lt;you&gt;/analysis.py</code> on AWS. This is the simplest choice for code in the workspace: uv keeps the installed packages in its own cache, not in your folder.</p>
 
           <h3>A project with several scripts</h3>
           <div class="code"><pre><span class="p">$ </span>cd ~/aws/workspace/&lt;you&gt;/project
 <span class="p">$ </span>uv init --bare
-<span class="p">$ </span>uv add pandas duckdb</pre></div>
+<span class="p">$ </span>uv add pandas boto3 pyarrow</pre></div>
           <p>This writes <code>pyproject.toml</code> (what you use) and <code>uv.lock</code> (exact versions); keep both. uv also makes a <code>.venv</code> folder here, which is slow on the shared workspace, so prefer the script header when you can. A <code>requirements.txt</code> next to the script works as well.</p>
           <p>rasterio, geopandas and pyogrio come with their own GDAL, so nothing else is needed for the satellite data.</p>
         </div>
@@ -452,16 +452,30 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
     </section>
 
     <section id="datasets">
-      <h2>Data (DuckDB)</h2>
-      <p>This is where to get data. The datasets are Parquet files, laid out for fast filtering, and you query them with DuckDB: a job pulled all-India CPHS income, consumption and member income in under two minutes.</p>
+      <h2>Data</h2>
+      <p>This is where to get data. The datasets are proprietary, so they can only be <i>queried</i>, never copied: you send SQL, it runs in AWS under your name, and only the result comes back. Every query is recorded with who ran it. The same lines work on your laptop and in a job.</p>
       <div class="table"><table>
         <thead><tr><th>Dataset</th><th>Tables</th><th>Split by</th></tr></thead>
         <tbody>
-          <tr><td><code>hhd</code></td><td>CPHS: <code>hh_income_monthly</code>, <code>hh_consumption_monthly</code>, <code>hh_consumption_weekly</code>, <code>member_income_monthly</code>, <code>people_of_india_wave</code>, <code>aspirational_wave</code>, <code>hh_char</code></td><td><code>YEAR</code>, <code>STATE</code></td></tr>
+          <tr><td><code>hhd</code></td><td>CPHS: <code>hh_income_monthly</code>, <code>hh_consumption_monthly</code>, <code>hh_consumption_weekly</code>, <code>member_income_monthly</code>, <code>people_of_india_wave</code>, <code>aspirational_wave</code>, <code>hh_char</code></td><td><code>year</code>, <code>state</code></td></tr>
+          <tr><td><code>fld</code></td><td>Prowess (<code>prowess_sa_*</code>, <code>prowess_ca_*</code>), CapEx (<code>capex_*</code>), <code>identity</code>, <code>ic_nse_daily</code>: 127 tables</td><td><code>year</code>, for three tables: <code>prowess_sa_annual_expenditure</code>, <code>prowess_sa_annual_relatedparty_transaction</code>, <code>prowess_sa_daily_stocks</code></td></tr>
+          <tr><td><code>maps</code></td><td>Boundaries: <code>states</code>, <code>districts_2011</code>, <code>districts_states_hr</code>, <code>homogeneous_regions</code></td><td></td></tr>
         </tbody>
       </table></div>
-      <h3>Install DuckDB first</h3>
-      <p>DuckDB is what reads the datasets, and it isn&#8217;t installed with saturn. Install it on your laptop once; jobs need it too:</p>
+      <p>Table and column names are as in the MariaDB databases, in lower case.</p>
+      <p><b>Map shapes</b> are in the <code>shape</code> column, in MariaDB&#8217;s format: 4 bytes, then the standard WKB. Skip the 4 bytes. The coordinates are latitude and longitude (WGS 84).</p>
+      <div class="code"><pre><span class="c"># R, with sf</span>
+s &lt;- DBI::dbGetQuery(maps, "SELECT st_nm, shape FROM states")
+s$geometry &lt;- sf::st_as_sfc(structure(lapply(s$shape, function(b) as.raw(b)[-(1:4)]), class = "WKB"), crs = 4326)
+s &lt;- sf::st_as_sf(s[c("st_nm", "geometry")])
+
+<span class="c"># Python, with shapely</span>
+shapely.from_wkb([b[4:] for b in df["shape"]])
+
+<span class="c"># SQL</span>
+SELECT st_nm, ST_Area(ST_GeomFromBinary(substr(shape, 5))) FROM states</pre></div>
+      <h3>Install the connector once</h3>
+      <p>You don&#8217;t need DuckDB. Install these on your laptop once; jobs need them too:</p>
       <div class="tabs" data-group="lang">
         <div class="tablist" role="tablist" aria-label="Language">
           <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
@@ -469,21 +483,21 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
           <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
         </div>
         <div class="tabpanel" data-key="r" role="tabpanel">
-          <div class="code"><pre>install.packages(c("duckdb", "dbplyr"))</pre></div>
-          <p>Jobs already have them: the R image includes duckdb, DBI, dplyr, dbplyr and arrow. If your project uses renv, run <code>renv::snapshot()</code> after installing.</p>
+          <div class="code"><pre>install.packages(c("paws", "arrow"))</pre></div>
+          <p>If your project uses renv, start the script with <code>library(paws)</code> and <code>library(arrow)</code> and run <code>renv::snapshot()</code>. renv records only the packages your code names; without those lines, the job won&#8217;t have them.</p>
         </div>
         <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
           <div class="code"><pre><span class="p">$ </span>julia --project=.
-julia&gt; ]add DuckDB DBInterface DataFrames</pre></div>
+julia&gt; ]add AWS Parquet2 CSV DataFrames DBInterface</pre></div>
           <p>This records them in the project&#8217;s <code>Project.toml</code>, which is where the job gets them: the Julia image has no packages of its own.</p>
         </div>
         <div class="tabpanel" data-key="python" role="tabpanel" hidden>
-          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py duckdb pandas</pre></div>
+          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py boto3 pyarrow pandas</pre></div>
           <p>The job installs what the script lists. In a project, add them to <code>pyproject.toml</code> or <code>requirements.txt</code> instead.</p>
         </div>
       </div>
       <h3>Connect and query</h3>
-      <p>saturn's helper connects you with one line and makes every table available under its database name. The same lines work on your laptop and in a job.</p>
+      <p>saturn&#8217;s helper connects you with one line. The same lines work on your laptop and in a job.</p>
       <div class="tabs" data-group="lang">
         <div class="tablist" role="tablist" aria-label="Language">
           <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
@@ -491,17 +505,18 @@ julia&gt; ]add DuckDB DBInterface DataFrames</pre></div>
           <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
         </div>
         <div class="tabpanel" data-key="r" role="tabpanel">
-          <div class="code"><pre>source(Sys.getenv("SATURN_R"))
+          <div class="code"><pre>library(paws)
+library(arrow)
+source(Sys.getenv("SATURN_R"))
 con &lt;- saturn_db("hhd")
 
 df &lt;- DBI::dbGetQuery(con, "
-  SELECT YEAR, AVG(TOT_INC) AS avg_income
+  SELECT year, AVG(tot_inc) AS avg_income
   FROM hh_income_monthly
-  WHERE STATE = 'Karnataka' AND YEAR &gt;= 2022 AND RESPONSE_STATUS = 'Accepted'
-  GROUP BY YEAR ORDER BY YEAR")
+  WHERE state = 'Karnataka' AND year &gt;= 2022 AND response_status = 'Accepted'
+  GROUP BY year ORDER BY year")
 
-<span class="c"># or with dplyr</span>
-tbl(con, "hh_income_monthly") |&gt; filter(STATE == "Karnataka")</pre></div>
+DBI::dbListTables(con)</pre></div>
         </div>
         <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
           <div class="code"><pre>include(ENV["SATURN_JL"])
@@ -509,7 +524,9 @@ con = saturn_db("hhd")
 
 df = DBInterface.execute(con, """
   SELECT * FROM member_income_monthly
-  WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10""") |&gt; DataFrame</pre></div>
+  WHERE state = 'Karnataka' AND year = 2023 LIMIT 10""") |&gt; DataFrame
+
+saturn_tables(con)</pre></div>
         </div>
         <div class="tabpanel" data-key="python" role="tabpanel" hidden>
           <div class="code"><pre>import os
@@ -518,15 +535,27 @@ con = saturn_db("hhd")
 
 df = con.sql("""
   SELECT * FROM member_income_monthly
-  WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10""").df()</pre></div>
+  WHERE state = 'Karnataka' AND year = 2023 LIMIT 10""").df()   <span class="c"># .arrow(), .pl()</span>
+
+con.tables()</pre></div>
         </div>
       </div>
+      <h3>The SQL</h3>
+      <p>It&#8217;s Athena&#8217;s (Trino), close to what you know. The differences that come up:</p>
       <ul>
-        <li><b>Filter on <code>YEAR</code> and <code>STATE</code></b> whenever you can: those skip whole folders. <code>MONTH_SLOT_DATE</code> and <code>DISTRICT</code> are fast too.</li>
-        <li><b>Do the heavy work in SQL</b> (joins, date conversions, sorting). DuckDB uses every core; pull only the result into your language.</li>
-        <li><b>All-India pulls of many columns</b> belong in a job, not on your laptop.</li>
-        <li>To query several datasets together, add them to one connection: <code>saturn_db("fld", con = con)</code>.</li>
-        <li>The <code>hhd</code> data is a copy of the MariaDB <code>hhd</code> database as of 27 Oct 2026. For tables that aren't in the datasets, see the <a href="#appendix-mariadb">appendix</a>.</li>
+        <li>Strings in single quotes, names in double quotes. Column names come back in lower case (<code>tot_inc</code>).</li>
+        <li><code>year</code> is a whole number: <code>year = 2023</code>, not <code>'2023'</code>.</li>
+        <li>No <code>ILIKE</code>: use <code>lower(state) LIKE '%pradesh%'</code>. Dates: <code>date '2023-01-01'</code>, <code>date_trunc('month', month_slot_date)</code>, <code>year(month_slot_date)</code>.</li>
+        <li>dplyr&#8217;s lazy tables don&#8217;t work here: filter and summarise in SQL, then use dplyr on the result.</li>
+        <li>Another dataset&#8217;s tables by name: connected to <code>hhd</code>, <code>SELECT company_name FROM fld.identity WHERE co_code = 11</code> works.</li>
+      </ul>
+      <h3>Tips</h3>
+      <ul>
+        <li><b>Filter on <code>year</code> and <code>state</code></b> whenever you can: those skip whole folders.</li>
+        <li><b>Do the heavy work in SQL</b> (joins, aggregations): it runs in AWS on many machines, so only the answer travels. A query summarising all of India takes a few seconds.</li>
+        <li><b>Large pulls are fine but slower:</b> half a million rows by 44 columns takes about 5 seconds. Leave out <code>ORDER BY</code> on big pulls and sort afterwards.</li>
+        <li>Each query reads at most 20 GB (all of <code>hhd</code> is about 5 GB) and costs a fraction of a cent.</li>
+        <li>The data is a copy of the MariaDB databases as of 27 Oct 2026 (<code>hhd</code>) and 29 Oct 2026 (<code>fld</code>, <code>maps</code>). For tables that aren't in the datasets, see the <a href="#appendix-mariadb">appendix</a>.</li>
       </ul>
     </section>
 
@@ -556,7 +585,8 @@ df = con.sql("""
         <div><code>saturn status</code><span>What's connected</span></div>
         <div><code>saturn disconnect</code><span>Undo connect</span></div>
         <div><code>saturn run &lt;path&gt;</code><span>Run a .R, .jl or .py on AWS</span></div>
-        <div><code>CPU=… MEMORY=… SPOT=1</code><span>Machine size, cheaper Spot</span></div>
+        <div><code>--size large</code><span>Bigger machine (small … max)</span></div>
+        <div><code>SPOT=1 saturn run …</code><span>~70% cheaper, may be interrupted</span></div>
         <div><code>saturn list</code><span>Running jobs</span></div>
         <div><code>saturn logs &lt;id&gt;</code><span>Follow a job again</span></div>
         <div><code>saturn stop &lt;id&gt;</code><span>Stop a job</span></div>
@@ -586,14 +616,14 @@ df = con.sql("""
   host = Sys.getenv("DB_HOST"), port = as.integer(Sys.getenv("DB_PORT")),
   user = Sys.getenv("DB_USER"), password = Sys.getenv("DB_PASSWORD"),
   dbname = "fld", client.flag = RMariaDB::CLIENT_SSL)
-df &lt;- DBI::dbGetQuery(con, "SELECT * FROM some_table LIMIT 10")
+df &lt;- DBI::dbGetQuery(con, "SELECT co_code, company_name FROM identity LIMIT 10")
 DBI::dbDisconnect(con)</pre></div>
         </div>
         <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
           <div class="code"><pre>using MySQL, DBInterface, DataFrames
 con = DBInterface.connect(MySQL.Connection, ENV["DB_HOST"], ENV["DB_USER"], ENV["DB_PASSWORD"];
                           port=parse(Int, ENV["DB_PORT"]), db="fld", ssl_mode=:required)
-df = DBInterface.execute(con, "SELECT * FROM some_table LIMIT 10") |&gt; DataFrame
+df = DBInterface.execute(con, "SELECT co_code, company_name FROM identity LIMIT 10") |&gt; DataFrame
 DBInterface.close!(con)</pre></div>
         </div>
         <div class="tabpanel" data-key="python" role="tabpanel" hidden>
@@ -603,7 +633,7 @@ con = pymysql.connect(host=os.environ["DB_HOST"], port=int(os.environ["DB_PORT"]
                       user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"],
                       database="fld", ssl={"ssl": {}})
 with con.cursor() as cur:
-    cur.execute("SELECT * FROM some_table LIMIT 10")
+    cur.execute("SELECT co_code, company_name FROM identity LIMIT 10")
     df = pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
 con.close()</pre></div>
         </div>

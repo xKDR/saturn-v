@@ -1,0 +1,25 @@
+{
+  "note": "What saturn printed for the real job behind the film (ayush.patnaik/income/analysis.R, 3 Nov 2026, querying hhd through Athena; the packages' first install), and its Zulip notice. renv's curl warning and arrow's attach message are left out. Log lines carry aws logs tail's UTC timestamps.",
+  "before": [
+    "renv.lock was made with R 4.6",
+    "Started job 019c1fb045e44b4ca87dc2bcc0447e8b (xlarge: 16 vCPU, 120 GB)",
+    "Waiting for job 019c1fb045e44b4ca87dc2bcc0447e8b to start...",
+    "<span class=\"dim\">2026-11-03T12:57:51</span> Successfully downloaded 31 packages in 6.9 seconds."
+  ],
+  "after": [
+    "<span class=\"dim\">2026-11-03T12:58:55</span> Successfully installed 32 packages in 64 seconds.",
+    "<span class=\"dim\">2026-11-03T12:59:00</span> hhd: 7 tables (aspirational_wave, hh_char, hh_consumption_monthly, …)",
+    "<span class=\"dim\">2026-11-03T12:59:00</span> Querying hh_income_monthly for all of India",
+    "<span class=\"dim\">2026-11-03T12:59:03</span> 5,091,641 household-months -&gt; 325 state-years",
+    "<span class=\"dim\">2026-11-03T12:59:04</span> Saved results.rds and income-by-state.png",
+    "== job stopped: exit code 0 (Essential container in task exited)",
+    "== cost: $0.080 for 3.9 min at 16 vCPU / 120 GB (vCPU $0.044, memory $0.036, disk $0.000; on-demand list price)"
+  ],
+  "later": "1 minute later",
+  "zulip": {
+    "time": "18:29",
+    "machine": "16 vCPU / 120 GB",
+    "runtime": "3.9 min",
+    "cost": "$0.080"
+  }
+}

@@ -9,10 +9,11 @@ cd "$WORKSPACE/$(dirname "$1")" || exit 1
 export SATELLITE="/vsis3/$DATA_BUCKET"
 
 # saturn's helpers (saturn_db() etc.), sent along with the job by `saturn run`.
-printf '%s' "$SATURN_HELPER" >/tmp/saturn.py && export SATURN_PY=/tmp/saturn.py
+# (compressed, to fit in ECS's 8 KB of job settings)
+printf '%s' "$SATURN_HELPER" | base64 -d | gzip -dc >/tmp/saturn.py && export SATURN_PY=/tmp/saturn.py
 unset SATURN_HELPER
 
-# GDAL (/vsis3/ paths), boto3 and DuckDB read S3 with these; they come from the task role
+# GDAL (/vsis3/ paths), boto3 and saturn_db() read S3 with these; they come from the task role
 # and last about 6 hours.
 eval "$(python3 -c 'import json, os, urllib.request
 c = json.load(urllib.request.urlopen("http://169.254.170.2" + os.environ["AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"]))

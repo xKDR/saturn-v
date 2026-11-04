@@ -27,9 +27,11 @@
 # pyproject.toml, a requirements.txt next to the script, or the script's own header
 # (installed with uv, afresh in each job). Julia and R packages are cached between runs.
 #
+# --size picks the machine: small (1 vCPU, 4 GB), medium (4 vCPU, 16 GB; the default),
+# large (8 vCPU, 60 GB), xlarge (16 vCPU, 120 GB) or max (32 vCPU, 244 GB).
 # -e sets an environment variable inside the job (repeatable).
-# Size and options (env vars): CPU=16384 MEMORY=65536 (default 4 vCPU / 16 GB; up to
-# 32768 / 249856), SPOT=1 (~70% cheaper, can be interrupted), DETACH=1 (return at once).
+# Options (env vars): SPOT=1 (~70% cheaper, can be interrupted), DETACH=1 (return at once),
+# CPU=... MEMORY=... (exact Fargate units, instead of a size).
 # R jobs run on the R version (major.minor) of the renv.lock next to the script, or the
 # newest available; R_VERSION=4.5 chooses one.
 # Ctrl-C stops following a job; the job keeps running. Your laptop can sleep meanwhile.
@@ -113,7 +115,49 @@ do_update() {
     curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh |
       SATURN_SKIP_TOOLS=1 SATURN_HOME="$SATURN_HOME" sh
   fi
-  echo "If you're connected, reconnect to use it: saturn disconnect && saturn connect"
+  # Connected? Connect again with the new version, so its environment and helpers are
+  # the new ones too (connect keeps mounts and the tunnel that are already up).
+  if [[ -f $STATE_DIR/env ]]; then
+    echo "Reconnecting with the new version"
+    "$SATURN_HOME/bin/saturn" connect >/dev/null
+  fi
+}
+
+# --- Update notice -----------------------------------------------------------------
+# Once a day, in the background, ask GitHub which commit main is at; when this copy is
+# older, say so. On stderr, so `eval "$(saturn connect)"` is unaffected. A copy installed
+# before install.sh wrote VERSION is older by definition.
+installed_version() {
+  if [[ -d $SATURN_HOME/.git ]]; then git -C "$SATURN_HOME" rev-parse HEAD 2>/dev/null; else cat "$SATURN_HOME/VERSION" 2>/dev/null || echo unknown; fi
+}
+
+# Is there a newer saturn on GitHub? Asked at most once an hour (unauthenticated GitHub
+# allows 60 requests an hour per address, shared by everyone on a server like crayshrimp),
+# with a short timeout: if GitHub can't be reached, the last answer stands.
+update_available() {
+  local latest="$STATE_DIR/latest-version" mine newest
+  if [[ ! -f $latest || -n $(find "$latest" -mmin +60 2>/dev/null) ]]; then
+    touch "$latest"
+    newest=$(curl -fsS -m 4 -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/xKDR/saturn-v/commits/main 2>/dev/null) &&
+      [[ $newest =~ ^[0-9a-f]{40}$ ]] && printf '%s\n' "$newest" >"$latest"
+  fi
+  mine=$(installed_version) newest=$(cat "$latest" 2>/dev/null)
+  [[ -n $newest && $mine != "$newest" ]] || return 1
+  # A git checkout with its own commits on top of main isn't behind.
+  [[ -d $SATURN_HOME/.git ]] && git -C "$SATURN_HOME" merge-base --is-ancestor "$newest" HEAD 2>/dev/null && return 1
+  return 0
+}
+
+# Everyone works with the current saturn: the commands that use AWS wait for `saturn
+# update`. update, disconnect, stop and docs always work; status only says so.
+require_current() {
+  update_available || return 0
+  if [[ $1 == status ]]; then
+    echo "saturn: a newer version is available. Update with: saturn update" >&2
+    return 0
+  fi
+  echo "saturn: a newer version is out. Run first: saturn update" >&2
+  exit 1
 }
 
 # --- Deployment settings ---------------------------------------------------------
@@ -151,7 +195,6 @@ language_of() {
   esac
 }
 
-task_json() { aws ecs describe-tasks --cluster "$(cfg cluster)" --tasks "$1" --query 'tasks[0]' --output json; }
 task_field() { aws ecs describe-tasks --cluster "$(cfg cluster)" --tasks "$1" --query "tasks[0].$2" --output text; }
 
 follow() {
@@ -167,7 +210,8 @@ follow() {
     sleep 5
   done
 
-  aws logs tail "$(cfg log_group)" --log-stream-names "$container/$container/$task_id" --follow --format short &
+  # Unbuffered, so lines written to a file or pipe aren't lost when the tail is stopped below.
+  PYTHONUNBUFFERED=1 aws logs tail "$(cfg log_group)" --log-stream-names "$container/$container/$task_id" --follow --format short &
   local tail_pid=$!
   disown $tail_pid # no "Terminated" notice when we kill it below
   trap 'kill $tail_pid 2>/dev/null; echo; echo "Stopped following; job $task_id is still running (saturn logs $task_id)."; exit 130' INT
@@ -186,7 +230,7 @@ follow() {
   fi
   reason=$(task_field "$task_id" stoppedReason)
   echo "== job stopped: exit code $code ($reason)"
-  record_cost "$task_id" || echo "(couldn't record the cost; retry with: saturn cost $task_id)"
+  show_cost "$task_id" || echo "(couldn't work out the cost; see: saturn cost $task_id)"
   [[ $code == 0 ]]
 }
 
@@ -211,59 +255,42 @@ print(sys.argv[1], [d["pricePerUnit"]["USD"] for p in L for t in json.loads(p)["
   cat "$cache"
 }
 
-# Fargate bills from the start of the image pull until the task stops, per second,
-# with a one-minute minimum; ephemeral storage only above the free 20 GB.
-# ECS forgets stopped tasks after about an hour. If nobody was following the job then,
-# the details saved at launch (costs/pending/) and the time of the job's last log line
-# are used instead, and the record is marked approximate.
-record_cost() {
-  local task_id=$1 task approx=0 bucket record
-  bucket=$(cfg workspace_bucket)
+# A finished job's cost, printed. AWS records it for good (the job-finished Lambda writes it
+# to the costs bucket, which people can only read) whether or not anyone was following the
+# job; this only shows it. Fargate bills from the start of the image pull until the task
+# stops, per second, with a one-minute minimum; ephemeral storage only above the free 20 GB.
+# ECS forgets stopped tasks after about an hour; such a job is shown from AWS's record.
+show_cost() {
+  local task_id=$1 task record
   task=$(aws ecs describe-tasks --cluster "$(cfg cluster)" --tasks "$task_id" --output json |
     python3 -c 'import json, sys; t = json.load(sys.stdin)["tasks"]; print(json.dumps(t[0]) if t else "")')
   if [[ -z $task ]]; then
-    local pending container last
-    pending=$(aws s3 cp "s3://$bucket/costs/pending/$task_id.json" - 2>/dev/null) || { echo "no record of job $task_id" >&2; return 1; }
-    container=$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["containers"][0]["name"])' "$pending")
-    last=$(aws logs get-log-events --log-group-name "$(cfg log_group)" --log-stream-name "$container/$container/$task_id" \
-      --no-start-from-head --limit 1 --query 'events[0].timestamp' --output text)
-    task=$(python3 -c '
-import json, sys, datetime as dt
-t = json.loads(sys.argv[1])
-t["stoppedAt"] = dt.datetime.fromtimestamp(int(sys.argv[2]) / 1000, dt.timezone.utc).isoformat()
-print(json.dumps(t))' "$pending" "$last")
-    approx=1
-  fi
-  [[ $(python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("lastStatus"))' "$task") == STOPPED || $approx == 1 ]] ||
-    { echo "job $task_id is still running" >&2; return 1; }
-  record=$(python3 -c '
+    local key
+    key=$(aws s3 ls "s3://$(cfg costs_bucket)/tasks/" --recursive | awk -v f="/$task_id.json" 'index($4, f) {print $4; exit}')
+    [[ -n $key ]] || { echo "no record of job $task_id" >&2; return 1; }
+    record=$(aws s3 cp "s3://$(cfg costs_bucket)/$key" -)
+  else
+    [[ $(python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("lastStatus"))' "$task") == STOPPED ]] ||
+      { echo "job $task_id is still running" >&2; return 1; }
+    record=$(python3 -c '
 import json, sys, math, datetime as dt
-task, prices, who, approx = json.loads(sys.argv[1]), json.loads(sys.argv[2]), sys.argv[3], sys.argv[4] == "1"
+task, prices = json.loads(sys.argv[1]), json.loads(sys.argv[2])
 t = lambda k: dt.datetime.fromisoformat(task[k]) if task.get(k) else None
 start = t("pullStartedAt") or t("startedAt") or t("createdAt")
-stop = t("stoppedAt")
-seconds = max(60, math.ceil((stop - start).total_seconds()))
+seconds = max(60, math.ceil((t("stoppedAt") - start).total_seconds()))
 hours = seconds / 3600
 vcpu, gb = int(task["cpu"]) / 1024, int(task["memory"]) / 1024
 disk = task.get("ephemeralStorage", {}).get("sizeInGiB", 20)
 spot = task.get("capacityProviderName") == "FARGATE_SPOT"
-cmd = task.get("overrides", {}).get("containerOverrides", [{}])[0].get("command", [])
 cost = {
     "vcpu": round(vcpu * hours * float(prices["Fargate-vCPU-Hours:perCPU"]), 4),
     "memory": round(gb * hours * float(prices["Fargate-GB-Hours"]), 4),
     "storage": round(max(0, disk - 20) * hours * float(prices["Fargate-EphemeralStorage-GB-Hours"]), 4),
 }
-note = ["on-demand list price" + ("; Fargate Spot is billed less" if spot else "")]
-if approx: note.append("approximate: end time from the last log line")
-print(json.dumps({
-    "task_id": task["taskArn"].rsplit("/", 1)[1], "who": who, "script": cmd[4] if len(cmd) > 4 else "",
-    "language": task["containers"][0]["name"],
-    "task_definition": task.get("taskDefinitionArn", "").rsplit("/", 1)[-1],
-    "started": start.isoformat(), "stopped": stop.isoformat(), "billed_seconds": seconds,
-    "vcpu": vcpu, "memory_gb": gb, "storage_gb": disk, "spot": spot,
-    "exit_code": task["containers"][0].get("exitCode"),
-    "cost_usd": cost, "total_usd": round(sum(cost.values()), 4), "note": "; ".join(note),
-}))' "$task" "$(prices)" "$(aws sts get-caller-identity --query Arn --output text | sed 's|.*/||')" "$approx")
+print(json.dumps({"billed_seconds": seconds, "vcpu": vcpu, "memory_gb": gb, "cost_usd": cost,
+                  "total_usd": round(sum(cost.values()), 4),
+                  "note": "on-demand list price" + ("; Fargate Spot is billed less" if spot else "")}))' "$task" "$(prices)")
+  fi
   python3 -c '
 import json, sys
 r = json.loads(sys.argv[1]); c = r["cost_usd"]
@@ -271,8 +298,6 @@ money = lambda x: ("$%.3f" if x < 0.1 else "$%.2f") % x
 print("== cost: {} for {:.1f} min at {:g} vCPU / {:g} GB (vCPU {}, memory {}, disk {}; {})".format(
     money(r["total_usd"]), r["billed_seconds"] / 60, r["vcpu"], r["memory_gb"],
     money(c["vcpu"]), money(c["memory"]), money(c["storage"]), r["note"]))' "$record"
-  echo "$record" | aws s3 cp - "s3://$bucket/costs/tasks/$(date -u +%Y-%m)/$task_id.json" --only-show-errors
-  aws s3 rm --only-show-errors "s3://$bucket/costs/pending/$task_id.json" || true
 }
 
 # The R task definition for a script: the R version its renv.lock was made with (read
@@ -297,14 +322,50 @@ else:
              "Make the renv.lock with one of those, or choose one with R_VERSION=..." % (version, ", ".join(sorted(versions))))' "$DEPLOYMENT" "$version"
 }
 
+# Machine sizes for --size: name, vCPU, memory (GB), approximate cost per hour in Mumbai.
+SIZES="small 1 4 0.06
+medium 4 16 0.25
+large 8 60 0.62
+xlarge 16 120 1.24
+max 32 244 2.50"
+
+sizes_table() {
+  echo "Sizes (saturn run --size <name> ...):"
+  while read -r name cpu gb cost; do
+    printf '  %-7s %3s vCPU %4s GB   about $%s an hour%s\n' "$name" "$cpu" "$gb" "$cost" "$([[ $name == medium ]] && echo '   (default)')"
+  done <<<"$SIZES"
+}
+
 run_job() {
-  local envs=() lang launcher overrides capacity task_arn task_id task_definition
-  while [[ ${1:-} == -e ]]; do
-    [[ ${2:-} == *=* ]] || die "-e needs NAME=VALUE"
-    envs+=("$2")
-    shift 2
+  local envs=() size=${SIZE:-} lang launcher overrides capacity task_arn task_id task_definition
+  while [[ ${1:-} == -e || ${1:-} == --size || ${1:-} == -s || ${1:-} == --size=* ]]; do
+    case $1 in
+    -e)
+      [[ ${2:-} == *=* ]] || die "-e needs NAME=VALUE"
+      envs+=("$2")
+      shift 2
+      ;;
+    --size=*) size=${1#--size=}; shift ;;
+    *)
+      [[ -n ${2:-} ]] || { sizes_table >&2; exit 1; }
+      size=$2
+      shift 2
+      ;;
+    esac
   done
-  [[ $# -ge 1 ]] || die "usage: saturn run [-e NAME=VALUE ...] path/to/script.jl|.R|.py [args...]"
+  [[ $# -ge 1 ]] || die "usage: saturn run [--size small|medium|large|xlarge|max] [-e NAME=VALUE ...] path/to/script.jl|.R|.py [args...]"
+  local cpu=${CPU:-} memory=${MEMORY:-} label
+  if [[ -z $cpu && -z $memory ]]; then
+    local row
+    row=$(awk -v n="${size:-medium}" '$1 == n' <<<"$SIZES")
+    [[ -n $row ]] || { echo "saturn: no size called '$size'" >&2; sizes_table >&2; exit 1; }
+    read -r size cpu memory _ <<<"$row"
+    label="$size: $cpu vCPU, $memory GB"
+    cpu=$((cpu * 1024)) memory=$((memory * 1024))
+  else
+    [[ -z $size ]] || die "use either --size or CPU/MEMORY, not both"
+    label="custom: CPU=${cpu:-default}, MEMORY=${memory:-default}"
+  fi
   lang=$(language_of "$1")
   [[ -n $DEPLOYMENT ]] || DEPLOYMENT=$(deployment)
   if [[ $lang == r ]]; then
@@ -318,14 +379,17 @@ run_job() {
   [[ $lang == julia ]] && helper="$SATURN_HOME/lib/saturn.jl"
   [[ $lang == python ]] && helper="$SATURN_HOME/lib/saturn.py"
   envs=("MY_WORKSPACE=/workspace/$(my_folder)" ${envs[@]+"${envs[@]}"})
-  overrides=$(ENVS=$(printf '%s\n' ${envs[@]+"${envs[@]}"}) HELPER_FILE=$helper python3 -c '
-import json, os, sys
+  # saturn_db() in the job queries the datasets through Athena.
+  envs+=("SATURN_ATHENA_WORKGROUP=$(cfg athena_workgroup)" "SATURN_ATHENA_RESULTS=$(cfg athena_results_bucket)")
+  overrides=$(JOB_CPU=$cpu JOB_MEMORY=$memory ENVS=$(printf '%s\n' ${envs[@]+"${envs[@]}"}) HELPER_FILE=$helper python3 -c '
+import base64, gzip, json, os, sys
 container, launcher, args = sys.argv[1], sys.argv[2], sys.argv[3:]
 env = [dict(zip(("name", "value"), l.split("=", 1))) for l in os.environ["ENVS"].splitlines() if l]
-env.append({"name": "SATURN_HELPER", "value": open(os.environ["HELPER_FILE"]).read()})
+# The helper goes compressed: ECS allows only 8 KB of job settings.
+env.append({"name": "SATURN_HELPER", "value": base64.b64encode(gzip.compress(open(os.environ["HELPER_FILE"], "rb").read(), 9)).decode()})
 o = {"containerOverrides": [{"name": container, "command": ["bash", "-c", launcher, container] + args, "environment": env}]}
-if os.environ.get("CPU"): o["cpu"] = os.environ["CPU"]
-if os.environ.get("MEMORY"): o["memory"] = os.environ["MEMORY"]
+if os.environ.get("JOB_CPU"): o["cpu"] = os.environ["JOB_CPU"]
+if os.environ.get("JOB_MEMORY"): o["memory"] = os.environ["JOB_MEMORY"]
 print(json.dumps(o))' "$(cfg languages "$lang" container)" "$launcher" "$@")
 
   if [[ ${SPOT:-0} == 1 ]]; then
@@ -343,9 +407,7 @@ print(json.dumps(o))' "$(cfg languages "$lang" container)" "$launcher" "$@")
     --query 'tasks[0].taskArn' --output text)
   task_id=${task_arn##*/}
   [[ -n $task_id && $task_id != None ]] || die "AWS didn't start the job"
-  echo "Started job $task_id"
-  # Saved so the cost can still be worked out if nobody is following the job when it ends.
-  task_json "$task_id" | aws s3 cp - "s3://$(cfg workspace_bucket)/costs/pending/$task_id.json" --only-show-errors
+  echo "Started job $task_id ($label)"
 
   if [[ ${DETACH:-0} == 1 ]]; then
     echo "Follow with: saturn logs $task_id"
@@ -354,14 +416,10 @@ print(json.dumps(o))' "$(cfg languages "$lang" container)" "$launcher" "$@")
   fi
 }
 
+# Spending per month and person, from the records AWS keeps of every job (costs bucket, read-only).
 show_costs() {
-  local bucket dir="$STATE_DIR/costs"
-  bucket=$(cfg workspace_bucket)
-  # First record any finished jobs that nobody was following when they ended.
-  for pending in $(aws s3 ls "s3://$bucket/costs/pending/" | awk '{print $4}'); do
-    record_cost "${pending%.json}" 2>/dev/null || true
-  done
-  aws s3 sync --only-show-errors "s3://$bucket/costs/tasks/" "$dir/"
+  local dir="$STATE_DIR/costs"
+  aws s3 sync --only-show-errors "s3://$(cfg costs_bucket)/tasks/" "$dir/"
   python3 -c '
 import json, glob, collections, sys
 rows = [json.load(open(f)) for f in glob.glob(sys.argv[1] + "/**/*.json", recursive=True)]
@@ -546,13 +604,64 @@ do_unmount() {
 DB_LOCAL_PORT="${DB_LOCAL_PORT:-$(cat "$STATE_DIR/db-port" 2>/dev/null || echo 3306)}"
 our_tunnel() { [[ -f $STATE_DIR/tunnel.pid ]] && kill -0 "$(cat "$STATE_DIR/tunnel.pid")" 2>/dev/null; }
 
-# Is the tunnel really working? The database sends a greeting as soon as a connection
-# opens; a tunnel that's broken at the far end accepts the connection but stays silent.
+# Is something listening on the port? Checked without connecting: every connection
+# through the tunnel reaches the database, and MariaDB blocks the tunnel server (for
+# everyone) after 100 connections that close before logging in.
+port_listening() {
+  if command -v lsof >/dev/null; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN -t >/dev/null 2>&1
+  else
+    ss -Hltn "sport = :$1" 2>/dev/null | grep -q .
+  fi
+}
+
+# Is the tunnel really working? Logs in as the jobs' database user and quits: a tunnel
+# that's broken at the far end accepts the connection but never answers. A full login
+# (encrypted, as the database requires), not just the greeting, because a successful
+# login also clears MariaDB's count of failed connections. Any answer from the database
+# means the tunnel works, even a refused login. (Before `saturn connect` has written the
+# password, the tunnel is taken as working.)
 tunnel_alive() {
-  perl -MIO::Socket::INET -e '
+  local user pass
+  user=$(sed -n 's/^DB_USER=//p' "$ENV_FILE" 2>/dev/null)
+  pass=$(sed -n 's/^DB_PASSWORD=//p' "$ENV_FILE" 2>/dev/null)
+  [[ -n $user && -n $pass ]] || return 0
+  DB_PING_USER=$user DB_PING_PASSWORD=$pass perl -MIO::Socket::INET -MDigest::SHA=sha1 -e '
     my $s = IO::Socket::INET->new(PeerAddr => "127.0.0.1", PeerPort => $ARGV[0], Timeout => 5) or exit 1;
-    local $SIG{ALRM} = sub { exit 1 }; alarm 8;
-    sysread($s, my $buf, 4) or exit 1; exit 0' "$DB_LOCAL_PORT"
+    my $tls = eval { require IO::Socket::SSL; 1 };
+    local $SIG{ALRM} = sub { exit 1 }; alarm 10;
+    sub get { my ($n, $b) = (shift, ""); while (length $b < $n) { sysread($s, $b, $n - length $b, length $b) or exit 1 } $b }
+    sub packet { my $h = get(4); (get(unpack("V", substr($h, 0, 3) . "\0")), ord substr($h, 3)) }
+    sub send_packet { my ($b, $seq) = @_; syswrite($s, substr(pack("V", length $b), 0, 3) . chr($seq) . $b) }
+    sub scramble { my ($pw, $salt) = @_; my $h = sha1($pw); $h ^ sha1($salt . sha1($h)) }
+    my ($g, $seq) = packet();
+    ord($g) == 10 or exit 1;                              # the greeting, protocol 10
+    my $p = index($g, "\0", 1) + 1 + 4;                   # server version, connection id
+    my $salt = substr($g, $p, 8);                         # first part of the challenge
+    $p += 8 + 1 + 2 + 1 + 2 + 2 + 1 + 10;                 # filler, flags, charset, status, flags, length, reserved
+    $salt .= substr($g, $p, 12);                          # the rest of it
+    my $caps = unpack("v", substr($g, index($g, "\0", 1) + 1 + 4 + 9, 2));
+    my ($user, $pw) = @ENV{qw(DB_PING_USER DB_PING_PASSWORD)};
+    my $auth = scramble($pw, $salt);
+    my $flags = 0x1 | 0x200 | 0x8000 | 0x80000;           # long password, protocol 4.1, secure auth, plugin auth
+    if ($tls && $caps & 0x800) {                          # switch to TLS (the tunnel is the trusted part)
+      $flags |= 0x800;
+      send_packet(pack("VVC", $flags, 1 << 24, 33) . ("\0" x 23), ++$seq);
+      IO::Socket::SSL->start_SSL($s, SSL_verify_mode => 0) or exit 1;
+    }
+    send_packet(pack("VVC", $flags, 1 << 24, 33) . ("\0" x 23) . "$user\0" . chr(length $auth) . $auth .
+                "mysql_native_password\0", ++$seq);
+    my ($r, $rseq) = packet();
+    if (ord($r) == 0xFE) {                                # the server asks for another method
+      my ($plugin, $data) = $r =~ /^\xFE([^\0]*)\0(.*?)\0?$/s or exit 1;
+      $plugin eq "mysql_native_password" or exit 1;
+      send_packet(scramble($pw, $data), $rseq + 1);
+      ($r) = packet();
+    }
+    ord($r) == 0xFF and exit 0;                           # refused, but the database answered
+    ord($r) == 0 or exit 1;                               # logged in
+    send_packet("\x01", 0);                               # quit
+    exit 0' "$DB_LOCAL_PORT"
 }
 
 start_tunnel() {
@@ -561,7 +670,7 @@ start_tunnel() {
     if tunnel_alive; then echo "Database tunnel already open on 127.0.0.1:$DB_LOCAL_PORT"; return; fi
     echo "The database tunnel stopped answering; reopening it"
     stop_tunnel
-  elif port_open "$DB_LOCAL_PORT"; then
+  elif port_listening "$DB_LOCAL_PORT"; then
     die "port $DB_LOCAL_PORT is in use by something else (a local MySQL?). Use: DB_LOCAL_PORT=13306 saturn connect"
   fi
   command -v session-manager-plugin >/dev/null || die "install the Session Manager plugin first: brew install --cask session-manager-plugin"
@@ -587,8 +696,8 @@ start_tunnel() {
   echo $! >"$STATE_DIR/tunnel.pid"
   echo "$DB_LOCAL_PORT" >"$STATE_DIR/db-port"
   disown
-  for _ in $(seq 60); do port_open "$DB_LOCAL_PORT" && break; sleep 1; done
-  port_open "$DB_LOCAL_PORT" || die "the database tunnel didn't open; see $STATE_DIR/tunnel.log"
+  for _ in $(seq 60); do port_listening "$DB_LOCAL_PORT" && break; sleep 1; done
+  port_listening "$DB_LOCAL_PORT" || die "the database tunnel didn't open; see $STATE_DIR/tunnel.log"
   echo "Database tunnel open on 127.0.0.1:$DB_LOCAL_PORT"
 }
 
@@ -647,9 +756,20 @@ env = {
     "RENV_PATHS_LIBRARY_ROOT": os.path.expanduser("~/.local/share/renv/library"),
     "DB_HOST": "127.0.0.1", "DB_PORT": sys.argv[6], "DB_USER": s["username"], "DB_PASSWORD": s["password"],
 }
+# saturn_db() signs in to Athena with this profile. (DATASETS_S3, the direct path to the datasets,
+# goes once the datasets can only be queried; see xKDR/AWS-Server HANDOFF.md.)
+if sys.argv[10]:
+    env["DATASETS_S3"] = "s3://" + sys.argv[10]
+    env["SATURN_AWS_PROFILE"] = sys.argv[11]
+# saturn_db() queries the datasets through Athena (xKDR/AWS-Server query.tf).
+if sys.argv[12]:
+    env["SATURN_ATHENA_WORKGROUP"] = sys.argv[12]
+    env["SATURN_ATHENA_RESULTS"] = sys.argv[13]
 print("# Written by `saturn connect`, removed by `saturn disconnect`. Same names as inside a job.")
 for k, v in env.items(): print(f"{k}={v}")' "$secret" "$WORKSPACE_DIR" "$SATELLITE_DIR" "$(cfg data_bucket)" \
-      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$DATASETS_DIR" "$SATURN_HOME" "$(my_folder)" >"$ENV_FILE"
+      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$DATASETS_DIR" "$SATURN_HOME" "$(my_folder)" \
+      "$(uses_sso && cfg datasets_bucket)" "$AWS_PROFILE" \
+      "$(cfg athena_workgroup 2>/dev/null)" "$(cfg athena_results_bucket 2>/dev/null)" >"$ENV_FILE"
   )
   echo "Environment written to $ENV_FILE"
 }
@@ -695,13 +815,15 @@ do_status() {
     echo "database: tunnel open on 127.0.0.1:$DB_LOCAL_PORT"
   elif our_tunnel; then
     echo "database: tunnel not answering (run saturn connect to reopen it)"
-  elif port_open "$DB_LOCAL_PORT"; then
+  elif port_listening "$DB_LOCAL_PORT"; then
     echo "database: no tunnel (port $DB_LOCAL_PORT is used by something else; connect with DB_LOCAL_PORT=13306)"
   else
     echo "database: no tunnel"
   fi
   if [[ -f $ENV_FILE ]]; then echo "environment: $ENV_FILE"; else echo "environment: not written"; fi
 }
+
+[[ ${1:-} =~ ^(login|connect|status|run|list|logs|cost|costs)$ ]] && require_current "$1"
 
 case "$1" in
 login) shift; do_login "$@" ;;
@@ -714,7 +836,7 @@ stop) aws ecs stop-task --cluster "$(cfg cluster)" --task "${2:?usage: saturn st
   --reason "stopped by $(aws sts get-caller-identity --query Arn --output text | sed 's|.*/||') with saturn" \
   --query 'task.lastStatus' --output text ;;
 list) aws ecs list-tasks --cluster "$(cfg cluster)" --query 'taskArns[]' --output text | tr '\t' '\n' | sed 's|.*/||' ;;
-cost) record_cost "${2:?usage: saturn cost <task-id>}" ;;
+cost) show_cost "${2:?usage: saturn cost <task-id>}" ;;
 costs) show_costs ;;
 update) do_update ;;
 docs) # the guide in this checkout, so it matches this version of saturn

@@ -14,14 +14,13 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/pricing"
 	pricingtypes "github.com/aws/aws-sdk-go-v2/service/pricing/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-// costRecord is one job's cost, as kept in s3://<workspace>/costs/tasks/<YYYY-MM>/<id>.json
-// (written when a job stops by the job_finished Lambda in xKDR/AWS-Server, else by saturn).
+// costRecord is one job's cost, as kept in s3://<costs bucket>/tasks/<YYYY-MM>/<id>.json
+// (written when a job stops by the job_finished Lambda in xKDR/AWS-Server).
 type costRecord struct {
 	TaskID         string             `json:"task_id"`
 	Who            string             `json:"who"`
@@ -51,69 +50,53 @@ func money(x float64) string {
 
 func round4(x float64) float64 { return math.Round(x*1e4) / 1e4 }
 
-// recordCost finds or works out a stopped job's cost and prints it. ECS forgets stopped
-// tasks after about an hour; then the details saved at launch (costs/pending/) and the
-// time of the job's last log line are used, and the record is marked approximate.
-func (s *session) recordCost(ctx context.Context, id string) (*costRecord, error) {
+// showCost prints a stopped job's cost. AWS records every job's cost for good (the
+// job_finished Lambda in xKDR/AWS-Server writes it to the costs bucket, which people can
+// only read); this only shows it: worked out from the task while ECS still has it, and
+// from AWS's record once ECS has forgotten the task (about an hour after it stops).
+func (s *session) showCost(ctx context.Context, id string) (*costRecord, error) {
 	id = taskID(id)
 	t, err := s.describe(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	var task map[string]any
-	approx := false
+	var r *costRecord
 	if t != nil {
 		if status(t) != "STOPPED" {
 			return nil, fail("job %s is still running", id)
 		}
-		task = taskRecord(t)
-	} else {
-		raw, err := s.getObject(ctx, "costs/pending/"+id+".json")
-		if err != nil {
-			return nil, fail("no record of job %s", id)
-		}
-		if err := json.Unmarshal(raw, &task); err != nil {
+		if r, err = s.computeCost(ctx, taskRecord(t), false); err != nil {
 			return nil, err
 		}
-		last, err := s.lastLogTime(ctx, task, id)
-		if err != nil {
-			return nil, fail("job %s: no end time (%v)", id, err)
-		}
-		task["stoppedAt"] = isoTime(last)
-		approx = true
-	}
-
-	start := firstTime(task, "pullStartedAt", "startedAt", "createdAt")
-	key := "costs/tasks/" + start.UTC().Format("2006-01") + "/" + id + ".json"
-
-	// The Lambda records the cost within seconds of the stop; use its record when it's there.
-	var r *costRecord
-	for i := 0; i < 6 && !approx; i++ {
-		if raw, err := s.getObject(ctx, key); err == nil {
-			r = &costRecord{}
-			if json.Unmarshal(raw, r) != nil {
-				r = nil
-			}
-			break
-		}
-		if !sleep(ctx, 5*time.Second) {
-			break
-		}
-	}
-	if r == nil {
-		if r, err = s.computeCost(ctx, task, approx); err != nil {
-			return nil, err
-		}
-		body, _ := json.Marshal(r)
-		if err := s.putObject(ctx, key, body); err != nil {
-			return nil, err
-		}
+	} else if r, err = s.costRecordOf(ctx, id); err != nil {
+		return nil, err
 	}
 	fmt.Printf("== cost: %s for %.1f min at %g vCPU / %g GB (vCPU %s, memory %s, disk %s; %s)\n",
 		money(r.TotalUSD), float64(r.BilledSeconds)/60, r.VCPU, r.MemoryGB,
 		money(r.CostUSD["vcpu"]), money(r.CostUSD["memory"]), money(r.CostUSD["storage"]), r.Note)
-	s3.NewFromConfig(s.cfg).DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.dep.WorkspaceBucket), Key: aws.String("costs/pending/" + id + ".json")})
 	return r, nil
+}
+
+// costRecordOf finds AWS's record of a job: tasks/<YYYY-MM>/<id>.json in the costs bucket.
+func (s *session) costRecordOf(ctx context.Context, id string) (*costRecord, error) {
+	p := s3.NewListObjectsV2Paginator(s3.NewFromConfig(s.cfg), &s3.ListObjectsV2Input{Bucket: aws.String(s.dep.CostsBucket), Prefix: aws.String("tasks/")})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range page.Contents {
+			if k := aws.ToString(o.Key); strings.HasSuffix(k, "/"+id+".json") {
+				raw, err := s.getObjectFrom(ctx, s.dep.CostsBucket, k)
+				if err != nil {
+					return nil, err
+				}
+				r := &costRecord{}
+				return r, json.Unmarshal(raw, r)
+			}
+		}
+	}
+	return nil, fail("no record of job %s", id)
 }
 
 func firstTime(task map[string]any, keys ...string) time.Time {
@@ -125,25 +108,6 @@ func firstTime(task map[string]any, keys ...string) time.Time {
 		}
 	}
 	return time.Time{}
-}
-
-func (s *session) lastLogTime(ctx context.Context, task map[string]any, id string) (time.Time, error) {
-	containers, _ := task["containers"].([]any)
-	if len(containers) == 0 {
-		return time.Time{}, fmt.Errorf("no container")
-	}
-	name, _ := containers[0].(map[string]any)["name"].(string)
-	out, err := cloudwatchlogs.NewFromConfig(s.cfg).GetLogEvents(ctx, &cloudwatchlogs.GetLogEventsInput{
-		LogGroupName: aws.String(s.dep.LogGroup), LogStreamName: aws.String(name + "/" + name + "/" + id),
-		StartFromHead: aws.Bool(false), Limit: aws.Int32(1),
-	})
-	if err != nil {
-		return time.Time{}, err
-	}
-	if len(out.Events) == 0 {
-		return time.Time{}, fmt.Errorf("no output")
-	}
-	return time.UnixMilli(aws.ToInt64(out.Events[0].Timestamp)), nil
 }
 
 // Fargate bills from the start of the image pull until the task stops, per second,
@@ -276,31 +240,11 @@ func onDemandPrice(list []string) (string, error) {
 // ~/.config/saturn-v/costs, so only new records are downloaded).
 func (s *session) showCosts(ctx context.Context) error {
 	client := s3.NewFromConfig(s.cfg)
-	bucket := aws.String(s.dep.WorkspaceBucket)
-
-	// First record any finished jobs that nobody was following when they ended.
-	pending := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: bucket, Prefix: aws.String("costs/pending/")})
-	for pending.HasMorePages() {
-		page, err := pending.NextPage(ctx)
-		if err != nil {
-			return err
-		}
-		for _, o := range page.Contents {
-			id := strings.TrimSuffix(filepath.Base(aws.ToString(o.Key)), ".json")
-			if t, _ := s.describe(ctx, id); t == nil || status(t) == "STOPPED" {
-				devnull, _ := os.Open(os.DevNull)
-				stdout := os.Stdout
-				os.Stdout = devnull
-				s.recordCost(ctx, id)
-				os.Stdout = stdout
-				devnull.Close()
-			}
-		}
-	}
+	bucket := aws.String(s.dep.CostsBucket)
 
 	dir := filepath.Join(stateDir(), "costs")
 	var keys []string
-	p := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: bucket, Prefix: aws.String("costs/tasks/")})
+	p := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: bucket, Prefix: aws.String("tasks/")})
 	sizes := map[string]int64{}
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
@@ -326,10 +270,10 @@ func (s *session) showCosts(ctx context.Context) error {
 			defer wg.Done()
 			limit <- struct{}{}
 			defer func() { <-limit }()
-			local := filepath.Join(dir, strings.TrimPrefix(k, "costs/tasks/"))
+			local := filepath.Join(dir, strings.TrimPrefix(k, "tasks/"))
 			raw, err := os.ReadFile(local)
 			if err != nil || int64(len(raw)) != sizes[k] {
-				if raw, err = s.getObject(ctx, k); err != nil {
+				if raw, err = s.getObjectFrom(ctx, s.dep.CostsBucket, k); err != nil {
 					return
 				}
 				os.MkdirAll(filepath.Dir(local), 0o755)

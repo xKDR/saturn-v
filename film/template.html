@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saturn V: getting started</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* The film: a 1600×900 stage in xKDR's colours (ink, coral #f57d6a, warm grey #f2f1f0),
+   one idea per frame. Everything on it is set by render(t) from the time alone. */
+:root {
+  --ink: #1c1c1c; --muted: #6b6866; --faint: #a9a5a2; --grey: #f2f1f0; --line: #e4e1de;
+  --coral: #f57d6a; --coral-ink: #b8483a; --stage: #ffffff;
+  --display: "Montserrat", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #f2f1f0; color: var(--ink); font-family: var(--display); }
+.page { max-width: 1240px; margin: 0 auto; padding: 28px 20px 40px; display: flex; flex-direction: column; gap: 14px; }
+#stageWrap { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.12); background: var(--stage); }
+#stage { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; background: var(--stage); overflow: hidden; }
+.controls { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.controls button { font: inherit; font-weight: 600; border: 1px solid #d6d2ce; background: #fff; border-radius: 99px; padding: 6px 14px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.controls button:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
+.controls svg { width: 14px; height: 14px; }
+.controls input[type=range] { flex: 1; accent-color: var(--coral); }
+.controls #time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; text-align: right; }
+.meta { font-size: 13px; color: var(--muted); }
+
+/* ---------- stage pieces ---------- */
+.L { position: absolute; will-change: opacity, transform; }
+.center { left: 0; right: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.h1 { font-size: 92px; font-weight: 700; letter-spacing: -0.035em; line-height: 1.04; }
+.sub { font-size: 34px; font-weight: 500; color: var(--muted); letter-spacing: -0.01em; }
+.logo { width: 330px; height: auto; display: block; }
+.logo path { transition: none; }
+
+.cap { left: 0; right: 0; bottom: 34px; text-align: center; font-size: 36px; font-weight: 600; letter-spacing: -0.015em; }
+.cap small { display: block; font-size: 26px; font-weight: 500; color: var(--faint); margin-top: 4px; }
+.side { display: flex; flex-direction: column; gap: 18px; font-size: 46px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; }
+.side span { transition: none; }
+.side .dim { color: #b3afab; }
+
+/* light windows: a cool grey bar and a firmer edge, so they stand off the white stage */
+.win { background: #fff; border-radius: 16px; box-shadow: 0 30px 80px rgba(20,24,30,.20), 0 0 0 1px rgba(20,24,30,.18); overflow: hidden; display: flex; flex-direction: column; }
+.bar { flex: none; height: 40px; background: #e6e7ea; border-bottom: 1px solid #c9cbd0; display: flex; align-items: center; gap: 8px; padding: 0 16px; font-size: 15px; font-weight: 600; color: #3a3d42; }
+.bar i { width: 13px; height: 13px; border-radius: 50%; flex: none; }
+.bar i:nth-child(1) { background: #ff5f57; } .bar i:nth-child(2) { background: #febc2e; } .bar i:nth-child(3) { background: #28c840; }
+.bar span { flex: 1; text-align: center; padding-right: 56px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term { flex: 1; font-family: var(--mono); font-size: 19px; line-height: 1.62; padding: 18px 24px; white-space: pre; overflow: hidden; color: var(--ink); }
+.ps { color: var(--coral-ink); font-weight: 700; }
+.term b { font-weight: 700; }
+.dim { color: #9a9693; }
+.ok { color: #2f7d4f; font-weight: 600; }
+.caret { display: inline-block; width: 11px; height: 22px; background: var(--ink); vertical-align: -4px; }
+.uline { box-shadow: inset 0 -4px 0 var(--coral); }
+
+/* terminals and R consoles are dark, like Terminal in dark mode, so they stand off the white stage */
+.win.dark { background: #1c1c1c; box-shadow: 0 26px 70px rgba(28,28,28,.28), 0 0 0 1px rgba(0,0,0,.6); }
+.win.dark .bar { background: #2b2a29; border-bottom-color: #383634; color: #a9a5a2; }
+.win.dark .term { color: #f2f1f0; }
+.win.dark .ps { color: #f57d6a; }
+.win.dark .dim { color: #8f8b88; }
+.win.dark .ok { color: #7fd6a0; }
+.win.dark .caret { background: #f2f1f0; }
+
+/* mail */
+.mail { padding: 30px 36px; display: flex; flex-direction: column; gap: 16px; font-size: 19px; }
+.mail .from { color: var(--muted); }
+.mail .subj { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; }
+.mail .ln { height: 12px; background: #eeece9; border-radius: 6px; }
+.btn { align-self: flex-start; background: var(--ink); color: #fff; font-weight: 600; font-size: 18px; padding: 12px 24px; border-radius: 8px; }
+.btn.ghost { background: #fff; color: var(--ink); box-shadow: inset 0 0 0 1px #cfcbc7; }
+
+/* browser: Chrome's tab strip and address bar */
+.cstrip { flex: none; height: 44px; background: #dee1e6; display: flex; align-items: flex-end; gap: 14px; padding: 0 14px; }
+.cstrip .lights { align-self: center; display: flex; gap: 8px; }
+.cstrip .lights i { width: 13px; height: 13px; border-radius: 50%; display: block; }
+.cstrip .lights i:nth-child(1) { background: #ff5f57; } .cstrip .lights i:nth-child(2) { background: #febc2e; } .cstrip .lights i:nth-child(3) { background: #28c840; }
+.ctab { height: 34px; width: 280px; background: #fff; border-radius: 10px 10px 0 0; display: flex; align-items: center; gap: 10px; padding: 0 14px; font-size: 15px; font-weight: 600; color: #3c4043; margin-left: 8px; }
+.cfav { width: 16px; height: 16px; border-radius: 4px; background: #1c1c1c; position: relative; flex: none; }
+.cfav::after { content: ""; position: absolute; left: 5px; top: 5px; width: 6px; height: 6px; background: #f57d6a; }
+.ctool { flex: none; height: 46px; background: #fff; border-bottom: 1px solid #dadce0; display: flex; align-items: center; gap: 14px; padding: 0 14px; }
+.ctool .nav { color: #5f6368; font-size: 20px; display: flex; gap: 12px; }
+.omni { flex: 1; height: 32px; border-radius: 16px; background: #f1f3f4; display: flex; align-items: center; gap: 9px; padding: 0 15px; font-size: 15px; color: #202124; }
+.lock { width: 12px; height: 15px; position: relative; flex: none; color: #5f6368; }
+.lock::before { content: ""; position: absolute; left: 2px; top: 0; width: 8px; height: 8px; border: 2px solid currentColor; border-bottom: 0; border-radius: 5px 5px 0 0; box-sizing: border-box; }
+.lock::after { content: ""; position: absolute; left: 0; bottom: 0; width: 12px; height: 9px; background: currentColor; border-radius: 2px; }
+.approve { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; font-size: 18px; padding: 0 40px; }
+.approve .t { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; }
+.approve .row { display: flex; gap: 14px; }
+
+/* finder */
+.finder { flex: 1; display: grid; grid-template-columns: 170px 1fr; font-size: 16px; }
+.finder .sb { background: #f3f4f6; border-right: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 9px; color: var(--muted); }
+.finder .sb b { color: var(--ink); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+.finder .sb .on { color: var(--ink); font-weight: 700; }
+.files { padding: 24px; display: flex; flex-wrap: wrap; gap: 26px 22px; align-content: flex-start; position: relative; }
+.ico { width: 120px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; font-size: 15px; border-radius: 8px; padding: 6px 2px; }
+.ico span { padding: 1px 6px; border-radius: 5px; }
+.ico.sel span { background: #2f6fe0; color: #fff; }
+.ico.mine span { background: rgba(245,125,106,.25); }
+.fold { width: 80px; height: 60px; background: #8ec5ee; border-radius: 6px; position: relative; margin-top: 8px; }
+.fold::before { content: ""; position: absolute; left: 0; top: -9px; width: 34px; height: 14px; background: #8ec5ee; border-radius: 5px 5px 0 0; }
+.fold.coral, .fold.coral::before { background: var(--coral); }
+.doc { width: 56px; height: 70px; background: #fff; border: 2px solid #cfcbc7; border-radius: 5px; font-family: var(--mono); font-size: 12px; font-weight: 700; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px; color: var(--muted); overflow: hidden; }
+.doc img { width: 100%; height: 100%; object-fit: cover; }
+.doc.pic { padding: 0; border-color: #d6d2ce; }
+
+/* editor */
+.tabs { flex: none; display: flex; gap: 4px; padding: 8px 16px 0; background: #f3f4f6; font-family: var(--mono); font-size: 15px; border-bottom: 1px solid var(--line); }
+.tabs span { padding: 7px 16px; border-radius: 7px 7px 0 0; color: #8f8b88; }
+.tabs span.on { background: #fff; color: var(--ink); font-weight: 700; box-shadow: 0 1px 0 #fff; }
+.code { font-family: var(--mono); font-size: 19px; line-height: 1.66; padding: 16px 26px; white-space: pre; color: var(--ink); position: relative; }
+.code .k { color: var(--coral-ink); } .code .s { color: #2f6f8f; }
+.hl { position: absolute; left: 14px; right: 14px; background: rgba(245,125,106,.20); border-radius: 6px; }
+.console { border-top: 1px solid var(--line); background: #fbfaf9; font-family: var(--mono); font-size: 18px; line-height: 1.55; padding: 12px 26px; white-space: pre; color: var(--ink); flex: 1; overflow: hidden; }
+
+/* chips, cards, diagram */
+.chip { display: inline-flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 600; padding: 8px 16px; border-radius: 99px; background: #fff; box-shadow: inset 0 0 0 2px var(--ink); white-space: nowrap; }
+.chip.coral { background: var(--coral); box-shadow: none; color: #1c1c1c; font-weight: 700; }
+.chip.soft { box-shadow: inset 0 0 0 1.5px #cfcbc7; font-family: var(--mono); font-size: 17px; }
+.laptop .scr { height: 210px; border: 11px solid var(--ink); border-radius: 16px 16px 4px 4px; background: #fbfaf9; }
+.laptop .base { height: 17px; margin: 0 -34px; background: var(--ink); border-radius: 0 0 18px 18px; }
+.rack { border: 11px solid var(--ink); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 14px; background: #fff; }
+.rack i { flex: 1; border-radius: 6px; background: var(--grey); position: relative; }
+.rack i::after { content: ""; position: absolute; right: 14px; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%; background: var(--coral); }
+.cloud { border-radius: 50%; background: radial-gradient(closest-side, rgba(245,125,106,.16), rgba(245,125,106,0)); }
+.lbl { font-size: 24px; font-weight: 700; text-align: center; letter-spacing: -0.01em; }
+.lbl small { display: block; font-size: 19px; font-weight: 500; color: var(--faint); margin-top: 4px; }
+.pills { display: flex; flex-direction: column; gap: 18px; align-items: stretch; }
+.pills .chip { justify-content: center; }
+.dash { height: 0; border-top: 3px dashed #c9c5c1; }
+
+.card { background: #fff; border: 2.5px solid var(--ink); border-radius: 20px; padding: 24px 26px; display: flex; flex-direction: column; gap: 16px; }
+.card.cloudy { border-color: var(--coral); box-shadow: 0 0 0 8px rgba(245,125,106,.12); }
+.card .hd { display: flex; align-items: center; gap: 12px; font-size: 26px; font-weight: 700; letter-spacing: -0.015em; }
+.card .hd i { width: 32px; height: 22px; border: 3px solid var(--ink); border-radius: 5px; }
+.card.cloudy .hd i { border-color: var(--coral); background: rgba(245,125,106,.2); }
+.card .path { font-family: var(--mono); font-size: 16px; color: var(--muted); background: var(--grey); border-radius: 7px; padding: 6px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .row { display: flex; flex-wrap: wrap; gap: 10px; }
+.card .row span { font-family: var(--mono); font-size: 17px; border: 1.5px solid #d6d2ce; border-radius: 7px; padding: 5px 11px; background: #fff; }
+.shelf { display: flex; flex-wrap: wrap; gap: 10px; min-height: 92px; align-content: flex-start; }
+.slot { font-family: var(--mono); font-size: 17px; font-weight: 700; border-radius: 7px; padding: 6px 12px; border: 1.5px dashed #cfcbc7; color: transparent; }
+.slot.full { border: 1.5px solid var(--coral); background: rgba(245,125,106,.16); color: var(--ink); }
+.band { height: 56px; border-top: 3px dashed #c9c5c1; border-bottom: 3px dashed #c9c5c1; display: flex; align-items: center; justify-content: center; }
+.band span { font-size: 19px; font-weight: 700; color: var(--coral-ink); background: #fff; padding: 0 12px; letter-spacing: .02em; }
+.flyer { font-family: var(--mono); font-size: 17px; font-weight: 700; border-radius: 7px; padding: 6px 12px; border: 1.5px solid var(--coral); background: #fde7e3; }
+.langs { display: flex; flex-direction: column; gap: 12px; }
+.langs div { display: flex; align-items: center; gap: 16px; font-size: 24px; font-weight: 600; }
+.langs b { width: 100px; color: var(--faint); font-weight: 600; }
+.langs code { font-family: var(--mono); font-size: 21px; background: var(--grey); padding: 4px 12px; border-radius: 7px; font-weight: 700; }
+.sizes { display: flex; gap: 10px; }
+.sizes span { font-family: var(--mono); font-size: 19px; font-weight: 600; padding: 7px 14px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px #d6d2ce; color: var(--muted); background: #fff; }
+.sizes span.on { background: var(--coral); box-shadow: none; color: #1c1c1c; font-weight: 700; }
+
+/* chat */
+.chat { flex: 1; display: grid; grid-template-columns: 210px 1fr; font-size: 18px; }
+.chat .sb { background: #f3f4f6; border-right: 1px solid var(--line); padding: 18px; display: flex; flex-direction: column; gap: 11px; color: var(--muted); }
+.chat .sb b { color: var(--ink); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+.chat .sb .on { color: var(--ink); font-weight: 700; }
+.chat .topic { padding: 14px 24px; border-bottom: 1px solid var(--line); font-weight: 700; }
+.msg { display: grid; grid-template-columns: 50px 1fr; gap: 16px; padding: 22px 24px; }
+.av { width: 50px; height: 50px; border-radius: 10px; background: var(--ink); display: flex; align-items: center; justify-content: center; }
+.av i { width: 20px; height: 20px; background: var(--coral); display: block; }
+.who { font-weight: 700; } .who small { color: var(--faint); font-weight: 500; margin-left: 10px; font-size: 15px; }
+.mtitle { margin: 6px 0 12px; }
+.mtitle code { font-family: var(--mono); font-size: 16px; background: var(--grey); padding: 2px 7px; border-radius: 5px; }
+.mtable { border-collapse: collapse; font-size: 17px; }
+.mtable td { padding: 6px 34px 6px 0; border-bottom: 1px solid #eeece9; }
+.mtable td:first-child { font-weight: 700; }
+.mention { background: rgba(245,125,106,.25); color: #8f3326; border-radius: 5px; padding: 1px 6px; font-weight: 700; }
+
+.ql { background: #fff; border-radius: 16px; box-shadow: 0 34px 90px rgba(28,28,28,.28), 0 0 0 1px rgba(28,28,28,.10); overflow: hidden; display: flex; flex-direction: column; }
+.ql img { display: block; width: 100%; height: auto; }
+.timechip { background: var(--ink); color: #fff; font-size: 26px; font-weight: 700; padding: 14px 28px; border-radius: 99px; letter-spacing: -0.01em; }
+.timechip i { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--coral); margin-right: 12px; vertical-align: 1px; }
+
+#cur { left: 0; top: 0; width: 30px; height: 30px; z-index: 50; pointer-events: none; transform-origin: 4px 3px; }
+#ring { left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--coral); z-index: 49; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <div id="stageWrap"><div id="stage">
+
+    <!-- 1 open -->
+    <div class="L center" id="open" style="top:190px">
+      <div id="openLogo">/*__LOGO__*/</div>
+      <div class="h1" id="openH" style="margin-top:44px">Saturn V</div>
+      <div class="sub" id="openSub" style="margin-top:14px">Heavy jobs, from your laptop.</div>
+    </div>
+
+    <!-- 2 what it is -->
+    <div class="L cloud" id="d2cloud" style="left:960px;top:70px;width:580px;height:580px"></div>
+    <div class="L laptop" id="d2laptop" style="left:190px;top:270px;width:340px"><div class="scr"></div><div class="base"></div></div>
+    <div class="L lbl" id="d2lapL" style="left:150px;top:530px;width:420px">Your laptop</div>
+    <div class="L rack" id="d2rack" style="left:1110px;top:170px;width:280px;height:380px"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="L lbl" id="d2rackL" style="left:1000px;top:580px;width:500px">A bigger computer, in the cloud<small>up to 32 cores · 244 GB</small></div>
+    <div class="L dash" id="d2dashL" style="left:575px;top:0;width:95px"></div>
+    <div class="L dash" id="d2dashR" style="left:930px;top:0;width:140px"></div>
+    <div class="L pills" id="d2pills" style="left:670px;top:268px;width:260px">
+      <span class="chip coral" id="pill0">Your folder</span><span class="chip" id="pill1">Datasets</span><span class="chip" id="pill2">Satellite imagery</span>
+    </div>
+
+    <!-- 3 access -->
+    <div class="L win" id="mail" style="left:110px;top:150px;width:800px;height:520px">
+      <div class="bar"><i></i><i></i><i></i><span>Inbox</span></div>
+      <div class="mail">
+        <div class="from">AWS IAM Identity Center &lt;no-reply@login.awsapps.com&gt;</div>
+        <div class="subj">Invitation to join AWS IAM Identity Center</div>
+        <div class="ln" style="width:94%"></div><div class="ln" style="width:82%"></div><div class="ln" style="width:66%"></div><div class="ln" style="width:74%"></div>
+        <div class="btn" id="acceptBtn" style="margin-top:14px">Accept invitation</div>
+      </div>
+    </div>
+    <div class="L side" id="side3" style="left:990px;top:250px;width:520px">
+      <span id="s3a">Ask an admin to add you.</span>
+      <span id="s3b">Open the email.</span>
+      <span id="s3c">Choose a password and set up an authenticator app.</span>
+    </div>
+
+    <!-- terminals (4 install, 5 login, 6 connect, 10 run) -->
+    <div class="L win dark" id="tInstall" style="left:180px;top:100px;width:1240px;height:560px">
+      <div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><div class="term" id="tInstallB"></div>
+    </div>
+    <div class="L win dark" id="tLogin" style="left:90px;top:110px;width:940px;height:300px">
+      <div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><div class="term" id="tLoginB"></div>
+    </div>
+    <div class="L win" id="browser" style="left:660px;top:250px;width:850px;height:500px">
+      <div class="cstrip"><div class="lights"><i></i><i></i><i></i></div><div class="ctab"><span class="cfav"></span>AWS access portal</div></div>
+      <div class="ctool"><div class="nav"><span>←</span><span>→</span></div><div class="omni"><span class="lock"></span>d-9067ac7cfe.awsapps.com/start</div></div>
+      <div class="approve">
+        <div class="t">Allow botocore-client-saturn-v to access your data?</div>
+        <div style="color:#6b6866">Signed in as ayush.patnaik</div>
+        <div class="row"><span class="btn ghost">Deny access</span><span class="btn" id="allowBtn">Allow access</span></div>
+      </div>
+    </div>
+    <div class="L win dark" id="tConnect" style="left:70px;top:70px;width:1000px;height:430px">
+      <div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><div class="term" id="tConnectB" style="font-size:17.5px"></div>
+    </div>
+    <div class="L win" id="finder" style="left:790px;top:330px;width:740px;height:450px">
+      <div class="bar"><i></i><i></i><i></i><span id="finderTitle">aws</span></div>
+      <div class="finder">
+        <div class="sb"><b>Favourites</b><span>Desktop</span><span>Documents</span><span id="sbAws" class="on">aws</span><span id="sbWs">workspace</span></div>
+        <div class="files" id="fAws">
+          <div class="ico" id="icoWs"><div class="fold"></div><span>workspace</span></div>
+          <div class="ico"><div class="fold"></div><span>satellite</span></div>
+        </div>
+        <div class="files" id="fWs" style="display:none">
+          <div class="ico" id="icoMine"><div class="fold coral"></div><span>ayush.patnaik</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7 Datasets -->
+    <div class="L win dark" id="rcon" style="left:300px;top:220px;width:1000px;height:300px">
+      <div class="bar"><i></i><i></i><i></i><span>R Console</span></div><div class="term" id="rconB"></div>
+    </div>
+    <div class="L" id="duckOnce" style="left:300px;top:550px;width:1000px;display:flex;gap:12px;justify-content:center">
+      <span class="chip coral" id="once0">once</span><span class="chip soft" id="once1">Julia: ] add AWS Parquet2 CSV DataFrames DBInterface</span><span class="chip soft" id="once2">Python: uv add boto3 pyarrow pandas</span>
+    </div>
+    <div class="L win" id="editor" style="left:80px;top:46px;width:1440px;height:760px">
+      <div class="bar"><i></i><i></i><i></i><span id="edTitle">explore.R · ~/aws/workspace/ayush.patnaik/income</span></div>
+      <div class="tabs"><span id="tabR" class="on">explore.R</span><span id="tabJl">explore.jl</span><span id="tabPy">explore.py</span></div>
+      <div class="code" id="code"><div class="hl" id="hlA"></div><div class="hl" id="hlB"></div><div id="codeText"></div></div>
+      <div class="console" id="edCon"></div>
+    </div>
+
+    <!-- 8 a job -->
+    <div class="L card" id="cLap" style="left:110px;top:150px;width:580px">
+      <div class="hd"><i></i>Your laptop</div>
+      <div class="path">~/aws/workspace/ayush.patnaik/income</div>
+      <div class="row" id="lapFiles"><span>explore.R</span><span>analysis.R</span><span>renv.lock</span><span id="lapRes" style="border-color:#f57d6a;background:#fde7e3">results.rds</span></div>
+    </div>
+    <div class="L band" id="band8" style="left:690px;top:240px;width:220px"><span>workspace</span></div>
+    <div class="L card cloudy" id="cBox" style="left:910px;top:150px;width:580px">
+      <div class="hd"><i></i>Container in the cloud</div>
+      <div class="path">/workspace/ayush.patnaik/income</div>
+      <div class="row"><span>explore.R</span><span>analysis.R</span><span>renv.lock</span><span id="boxRes" style="border-color:#f57d6a;background:#fde7e3">results.rds</span></div>
+    </div>
+    <div class="L flyer" id="ghost" style="left:0;top:0">results.rds</div>
+    <div class="L side center" id="side8" style="top:520px;font-size:44px;gap:14px">
+      <span id="s8a">A job runs in a container that sees your workspace.</span>
+      <span id="s8b">The same script runs there, unchanged.</span>
+    </div>
+
+    <!-- 9 packages -->
+    <div class="L win dark" id="rcon9" style="left:70px;top:70px;width:880px;height:560px">
+      <div class="bar"><i></i><i></i><i></i><span>R Console · ~/aws/workspace/ayush.patnaik/income</span></div><div class="term" id="rcon9B" style="font-size:17px;line-height:1.55"></div>
+    </div>
+    <div class="L card cloudy" id="box9" style="left:1000px;top:70px;width:530px">
+      <div class="hd"><i></i>Container</div>
+      <div class="shelf" id="shelf"></div>
+      <div id="box9note" style="font-size:17px;color:#8f8b88">no packages yet</div>
+    </div>
+    <div class="L chip" id="lockChip" style="left:1000px;top:420px;font-family:var(--mono);font-size:19px">renv.lock</div>
+    <div class="L langs" id="langs" style="left:1000px;top:500px">
+      <div id="lgR"><b>R</b><code>renv.lock</code></div>
+      <div id="lgJl"><b>Julia</b><code>Project.toml</code></div>
+      <div id="lgPy"><b>Python</b><code>pyproject.toml</code></div>
+    </div>
+    <div class="L side" id="side9" style="left:70px;top:680px;width:880px;font-size:40px;gap:10px">
+      <span id="s9a">The container starts empty.</span>
+      <span id="s9b">Your list tells it what to install.</span>
+    </div>
+    <div id="flyers"></div>
+
+    <!-- 10 run -->
+    <div class="L win dark" id="tRun" style="left:90px;top:56px;width:1420px;height:620px;transform-origin:50% 100%">
+      <div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><div class="term" id="tRunB" style="font-size:17px;line-height:1.6"></div>
+    </div>
+    <div class="L sizes" id="sizes" style="left:90px;top:700px"><span>small</span><span>medium</span><span>large</span><span id="szX">xlarge</span><span>max</span></div>
+    <div class="L center" id="later" style="top:400px"><div class="timechip"><i></i><span id="laterText">5 minutes later</span></div></div>
+
+    <!-- 11 Zulip -->
+    <div class="L win" id="zulip" style="left:190px;top:90px;width:1220px;height:640px">
+      <div class="bar"><i></i><i></i><i></i><span>Zulip · xKDR</span></div>
+      <div class="chat">
+        <div class="sb"><b>Channels</b><span class="on"># saturn-v</span><span># general</span><span># papers</span><span># data</span></div>
+        <div style="display:flex;flex-direction:column">
+          <div class="topic"># saturn-v › jobs</div>
+          <div class="msg" id="zmsg">
+            <div class="av"><i></i></div>
+            <div>
+              <div class="who">saturn-v<small id="zTime"></small></div>
+              <div class="mtitle"><b>✅ Job finished</b>: <code>ayush.patnaik/income/analysis.R</code></div>
+              <table class="mtable"><tbody id="zRows"></tbody></table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 12 results -->
+    <div class="L win" id="finder12" style="left:200px;top:110px;width:1200px;height:520px">
+      <div class="bar"><i></i><i></i><i></i><span>income</span></div>
+      <div class="finder">
+        <div class="sb"><b>Favourites</b><span>aws</span><span>workspace</span><span class="on">ayush.patnaik</span></div>
+        <div class="files" style="gap:30px 26px">
+          <div class="ico"><div class="doc">.R</div><span>explore.R</span></div>
+          <div class="ico"><div class="doc">.R</div><span>analysis.R</span></div>
+          <div class="ico"><div class="doc">lock</div><span>renv.lock</span></div>
+          <div class="ico"><div class="fold"></div><span>renv</span></div>
+          <div class="ico" id="icoRds"><div class="doc">.rds</div><span>results.rds</span></div>
+          <div class="ico" id="icoPng"><div class="doc pic"><img id="pngThumb" alt=""></div><span>income-by-state.png</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="L ql" id="ql" style="left:340px;top:36px;width:920px"><div class="bar"><i></i><i></i><i></i><span>income-by-state.png</span></div><img id="chart" alt="Average monthly household income by state, 2014 to 2026"></div>
+
+    <!-- 13 close -->
+    <div class="L center" id="close" style="top:250px">
+      <div id="closeLogo">/*__LOGO__*/</div>
+      <div class="h1" id="closeH" style="margin-top:44px;font-size:76px">Same code. A bigger computer.</div>
+      <div class="sub" id="closeSub" style="margin-top:18px">Run <span style="font-family:var(--mono);color:#d9604d;font-weight:700">saturn docs</span> for the guide.</div>
+    </div>
+
+    <div class="L cap" id="cap"><span id="capA"></span><small id="capB"></small></div>
+    <div class="L" id="ring"></div>
+    <svg class="L" id="cur" viewBox="0 0 30 30"><path d="M4 3 L4 24 L9.5 18.6 L13.2 27 L17 25.3 L13.4 17.2 L21 17.2 Z" fill="#1c1c1c" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg>
+  </div></div>
+  <div class="controls">
+    <button type="button" id="playBtn">Play</button>
+    <button type="button" id="restartBtn">Restart</button>
+    <input type="range" id="scrub" min="0" step="0.01" value="0" aria-label="Position in the film">
+    <span id="time">0:00</span>
+  </div>
+  <div class="meta" id="meta"></div>
+</div>
+<script>
+/*__DATA__*/
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var params = new URLSearchParams(location.search);
+  var STAGE_W = 1600;
+  function seg(t, a, b) { return Math.min(1, Math.max(0, (t - a) / (b - a))); }
+  function easeOut(x) { return 1 - Math.pow(1 - x, 3); }
+  function easeInOut(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+  function backOut(x) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); }
+  function lerp(a, b, p) { return a + (b - a) * p; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  // The timeline comes from voiceover.py (out/vo/timing.json), so each beat lasts as long as its line.
+  var T = window.FILM.T, DUR = window.FILM.DUR, JOB = window.FILM.JOB;
+
+  // ---- visibility: fade + rise in, fade out ----
+  function vis(el, tIn, tOut, t, o) {
+    o = o || {};
+    var a = easeOut(seg(t, tIn, tIn + (o.dur || 0.6))), b = tOut == null ? 0 : easeInOut(seg(t, tOut, tOut + (o.out || 0.45)));
+    var v = a * (1 - b);
+    el.style.visibility = v > 0.001 ? 'visible' : 'hidden';
+    el.style.opacity = v.toFixed(3);
+    var dy = (o.dy == null ? 26 : o.dy) * (1 - a) - (o.up || 0) * b, s = lerp(o.s == null ? 0.985 : o.s, 1, a);
+    el.style.transform = 'translate(' + (o.x || 0) + 'px,' + dy.toFixed(1) + 'px) scale(' + s.toFixed(4) + ')';
+    return v;
+  }
+  function fadeOnly(el, v) { el.style.visibility = v > 0.001 ? 'visible' : 'hidden'; el.style.opacity = v.toFixed(3); }
+
+  // ---- terminals: lines appear at their time; the view keeps the last line in sight ----
+  var cache = {};
+  function term(id, lines, t, caretAt) {
+    var shown = lines.filter(function (l) { return t >= l[0]; }).map(function (l) { return l[1]; });
+    var caret = caretAt != null && t >= caretAt && Math.floor(t * 2) % 2 === 0;
+    var html = shown.join('\n') + (caretAt != null && t >= caretAt ? '\n<span class="ps">$</span> ' + (caret ? '<span class="caret"></span>' : '') : '');
+    if (cache[id] !== html) { $(id).innerHTML = html; cache[id] = html; }
+    var b = $(id); b.scrollTop = b.scrollHeight;
+  }
+  var P = '<span class="ps">$</span> ', R = '<span class="ps">&gt;</span> ';
+  function at(t0, gap, arr) { return arr.map(function (h, i) { return [t0 + gap * i, h]; }); }
+
+  var L_INSTALL = [[T.installPaste, P + 'curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | sh']].concat(at(T.installOut, 0.38, [
+    '<b>Installing awscli</b>', '<b>Installing rclone</b>', '<b>Installing the Session Manager plugin</b>', '<b>Installing saturn into ~/.saturn-v</b>',
+    '<b>Added saturn to ~/.zshrc</b>', '<b>Done. Open a new terminal, then:</b>',
+    '  saturn login      <span class="dim"># sign in (on a server: saturn login --use-device-code)</span>', '  saturn connect']));
+  var L_LOGIN = [[T.loginPaste, P + 'saturn login'],
+    [T.loginPaste + 0.45, '<span class="dim">Attempting to automatically open the SSO authorization page in your default browser.</span>'],
+    [T.signedIn, 'Signed in as ayush.patnaik (SaturnUser). Next: saturn connect']];
+  var L_CONNECT = [[T.connectPaste, P + 'saturn connect']].concat(at(T.connectOut, 0.3, [
+    'Mounted the workspace at /Users/ayushpatnaik/aws/workspace',
+    'Mounted satellite at /Users/ayushpatnaik/aws/satellite (read-only)',
+    'Your folder: /Users/ayushpatnaik/aws/workspace/ayush.patnaik',
+    '<span class="dim">Database tunnel open on 127.0.0.1:3306</span>',
+    '<span class="dim">Environment written to /Users/ayushpatnaik/.config/saturn-v/env</span>',
+    '<span class="ok">Connected.</span> New terminals pick up the environment.',
+    '<span class="dim">For this terminal: eval "$(saturn connect)"</span>']));
+  var L_DUCK = [[T.installDuck, R + 'install.packages(c("paws", "arrow"))']];
+
+  // explore.R in three languages; the R console shows the real result.
+  var CODE = {
+    R: ['<span class="k">library</span>(paws)', '<span class="k">library</span>(arrow)', 'source(Sys.getenv(<span class="s">"SATURN_R"</span>))', 'con <span class="k">&lt;-</span> saturn_db(<span class="s">"hhd"</span>)', '',
+        'df <span class="k">&lt;-</span> DBI::dbGetQuery(con, <span class="s">"SELECT year, AVG(tot_inc) AS avg_income</span>',
+        '<span class="s">                            FROM hh_income_monthly</span>',
+        '<span class="s">                            WHERE state = \'Karnataka\' AND year &gt;= 2022</span>',
+        '<span class="s">                              AND response_status = \'Accepted\'</span>',
+        '<span class="s">                            GROUP BY year ORDER BY year"</span>)'],
+    Jl: ['', '<span class="k">include</span>(ENV[<span class="s">"SATURN_JL"</span>])', '', 'con = saturn_db(<span class="s">"hhd"</span>)', '',
+        'df = DBInterface.execute(con, <span class="s">"""SELECT year, AVG(tot_inc) AS avg_income</span>',
+        '<span class="s">                                 FROM hh_income_monthly</span>',
+        '<span class="s">                                 WHERE state = \'Karnataka\' AND year &gt;= 2022</span>',
+        '<span class="s">                                   AND response_status = \'Accepted\'</span>',
+        '<span class="s">                                 GROUP BY year ORDER BY year"""</span>) |&gt; DataFrame'],
+    Py: ['<span class="k">import</span> os', 'exec(open(os.environ[<span class="s">"SATURN_PY"</span>]).read())', '', 'con = saturn_db(<span class="s">"hhd"</span>)', '',
+        'df = con.sql(<span class="s">"""SELECT year, AVG(tot_inc) AS avg_income</span>',
+        '<span class="s">                FROM hh_income_monthly</span>',
+        '<span class="s">                WHERE state = \'Karnataka\' AND year &gt;= 2022</span>',
+        '<span class="s">                  AND response_status = \'Accepted\'</span>',
+        '<span class="s">                GROUP BY year ORDER BY year"""</span>).df()']
+  };
+  var CODE_LINE_H = 19 * 1.66;
+  var L_RESULT = [[T.result - 0.5, R + 'source("explore.R"); df'],
+    [T.result, '<span class="dim">hhd: 7 tables (aspirational_wave, hh_char, hh_consumption_monthly, hh_consumption_weekly, …)</span>'],
+    [T.result + 0.15, '  year avg_income'], [T.result + 0.2, '1 2022   13717.74'], [T.result + 0.25, '2 2023   14553.75'],
+    [T.result + 0.3, '3 2024   15458.30'], [T.result + 0.35, '4 2025   16511.11'], [T.result + 0.4, '5 2026   17331.75']];
+
+  // renv in scene 9: the real snapshot of this project (renv 1.3.1, R 4.6.1)
+  var PKGS = 'arrow=26.0.0 askpass=1.2.1 assertthat=0.2.1 base64enc=0.1-6 bit=4.6.0 bit64=4.8.6 cli=3.6.6 cpp11=0.5.5 curl=8.1.0 DBI=1.3.0 digest=0.6.39 farver=2.1.2 ggplot2=4.0.3 glue=1.8.1 gtable=0.3.6 httr2=1.3.0 isoband=0.3.0 jsonlite=2.0.0 labeling=0.4.3 lifecycle=1.0.5 magrittr=2.0.5 openssl=2.5.0 paws=0.11.0 paws.analytics=0.11.0 paws.application.integration=0.11.0 paws.common=0.9.0 paws.compute=0.11.0 paws.cost.management=0.11.0 paws.customer.engagement=0.11.0 paws.database=0.11.0 paws.developer.tools=0.11.0 paws.end.user.computing=0.11.0 paws.machine.learning=0.11.0 paws.management=0.11.0 paws.networking=0.11.0 paws.security.identity=0.11.0 paws.storage=0.11.0 purrr=1.2.2 R6=2.6.1 RColorBrewer=1.1-3 Rcpp=1.1.2 renv=1.3.1 rlang=1.3.0 S7=0.2.2 scales=1.4.0 sys=3.4.3 tidyselect=1.2.1 vctrs=0.7.3 viridisLite=0.4.3 withr=3.0.3 xml2=1.6.0'
+    .split(' ').map(function (p) { return p.split('='); });
+  var L_RENV = [[T.cInit, R + 'renv::init()        <span class="dim"># once per project</span>'], [T.cInit + 0.5, '<span class="dim">- renv activated -- please restart the R session.</span>'],
+    [T.cInstall, R + 'install.packages(c("paws", "arrow", "ggplot2"))'], [T.cSnap, R + 'renv::snapshot()'],
+    [T.cSnap + 0.4, 'The following package(s) will be updated in the lockfile:'], [T.cSnap + 0.45, ''],
+    [T.cSnap + 0.5, '# CRAN -----------------------------------------------']].concat(
+    PKGS.map(function (p, i) { return [T.cSnap + 0.6 + 0.03 * i, '- ' + (p[0] + '                              ').slice(0, 29) + '[* -&gt; ' + p[1] + ']']; }),
+    [[T.lock - 0.15, ''], [T.lock, '- Lockfile written to "~/aws/workspace/ayush.patnaik/income/renv.lock".']]);
+  var SHELF = ['paws', 'arrow', 'ggplot2', 'DBI', 'jsonlite', 'scales', 'rlang', '+44'];
+
+  // the job, as saturn printed it (see data in build.mjs)
+  var L_RUN = [[T.runPaste, P + 'saturn run <span id="sizeArg">--size xlarge</span> ayush.patnaik/income/analysis.R']].concat(
+    at(T.runOut, 0.5, JOB.before), at(T.done, 0.18, JOB.after));
+
+  // pointer waypoints: [t, element id (or {x,y}), seconds to get there]; clicks at times
+  var MOVES = [
+    [T.accept - 1.0, 'acceptBtn', 0.8], [T.allow - 0.9, 'allowBtn', 0.75], [T.openWs - 0.9, 'icoWs', 0.75],
+    [T.mine - 0.6, 'icoMine', 0.5], [T.ql - 1.0, 'icoPng', 0.8]];
+  var CLICKS = [T.accept, T.allow, T.openWs, T.openWs + 0.18, T.ql];
+  var POINTER_ON = [[T.s3, T.s4 - 0.3], [T.s5 + 1.6, T.browserOut + 0.1], [T.finderIn + 0.3, T.s7 - 0.3], [T.s12 + 0.5, T.ql + 0.25]];
+
+  var CAPS = [
+    [T.s3 + 0.5, T.s4 - 0.3, 'The invitation is valid for 7 days.', ''],
+    [T.installOut, T.s5 - 0.3, 'Once, on a Mac or Linux.', ''],
+    [T.signedIn, T.s6 - 0.3, 'One sign-in lasts 7 days.', ''],
+    [T.lid + 0.2, T.later + 0.2, 'Close the laptop if you like.', 'The job keeps going.'],
+    [T.ql + 0.5, T.s13 - 0.3, 'Written by the job in the cloud.', 'Already in your folder on your laptop.']];
+
+  // ---- the open and close logos build from their pixel squares ----
+  function pixels(root) {
+    var ps = Array.prototype.slice.call(root.querySelectorAll('path')).map(function (p) {
+      var m = /M([\d.]+) ([\d.]+)/.exec(p.getAttribute('d')) || [0, 0, 0];
+      return { el: p, x: +m[1], y: +m[2], coral: /F57D6A/i.test(p.getAttribute('fill')) };
+    });
+    ps.forEach(function (p) { p.k = (p.coral ? 0.75 : 0) + (p.x / 611) * 0.7 + ((p.y * 7.3) % 1) * 0.08; });
+    return ps;
+  }
+  var openPx = pixels($('openLogo')), closePx = pixels($('closeLogo'));
+  function buildLogo(ps, t0, t) {
+    ps.forEach(function (p) { var v = easeOut(seg(t, t0 + p.k * 1.4, t0 + p.k * 1.4 + 0.35)); p.el.style.opacity = v.toFixed(3); });
+  }
+
+  var stage = $('stage');
+  function centre(id) {
+    var r = $(id).getBoundingClientRect(), s = stage.getBoundingClientRect(), k = s.width / STAGE_W;
+    return { x: (r.left + r.width / 2 - s.left) / k, y: (r.top + r.height / 2 - s.top) / k };
+  }
+
+  $('chart').src = window.FILM.CHART; $('pngThumb').src = window.FILM.CHART;
+  $('zTime').textContent = 'bot · ' + JOB.zulip.time;
+  $('zRows').innerHTML = [['Who', '<span class="mention" id="mention">@Ayush Patnaik</span>'], ['Language', 'R 4.6'], ['Machine', JOB.zulip.machine],
+    ['Runtime', JOB.zulip.runtime], ['Cost', JOB.zulip.cost], ['Exit code', '0']].map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('');
+  $('laterText').textContent = JOB.later;
+
+  // ---------------- render(t) ----------------
+  function render(t) {
+    // 1 open
+    buildLogo(openPx, 0.15, t);
+    var oOut = easeInOut(seg(t, T.s2 - 0.6, T.s2 - 0.1));
+    vis($('open'), 0, null, t, { dur: 0.01, dy: 0 });
+    $('open').style.opacity = (1 - oOut).toFixed(3); $('open').style.visibility = oOut < 1 ? 'visible' : 'hidden';
+    vis($('openH'), 1.25, null, t, { dy: 18 }); vis($('openSub'), 1.8, null, t, { dy: 14 });
+
+    // 2 what it is
+    var o2 = T.s3 - 0.5;
+    vis($('d2laptop'), T.s2, o2, t); vis($('d2lapL'), T.s2 + 0.3, o2, t, { dy: 12 });
+    vis($('d2cloud'), T.rack, o2, t, { dy: 0, s: 0.7, dur: 1.2 });
+    vis($('d2rack'), T.rack, o2, t, { dy: 40, s: 0.8, dur: 0.8 }); vis($('d2rackL'), T.rack + 0.4, o2, t, { dy: 12 });
+    vis($('d2pills'), T.pills, o2, t, { dy: 0, dur: 0.01 });
+    for (var i = 0; i < 3; i++) vis($('pill' + i), T.pills + 0.25 * i, o2, t, { dy: 14, s: 0.9 });
+    var lk = easeInOut(seg(t, T.links, T.links + 0.7));
+    ['d2dashL', 'd2dashR'].forEach(function (id, j) {
+      var el = $(id);
+      fadeOnly(el, lk * (1 - easeInOut(seg(t, o2, o2 + 0.45))));
+      el.style.top = (j ? 0 : 0) + 'px';
+    });
+    // the dashes run from each pill to both machines
+    $('d2dashL').style.transform = 'translateY(' + 293 + 'px) scaleX(' + lk.toFixed(3) + ')'; $('d2dashL').style.transformOrigin = '100% 0';
+    $('d2dashR').style.transform = 'translateY(' + 293 + 'px) scaleX(' + lk.toFixed(3) + ')'; $('d2dashR').style.transformOrigin = '0 0';
+
+    // 3 access
+    var o3 = T.s4 - 0.45;
+    vis($('mail'), T.s3, o3, t, { dy: 40 });
+    vis($('side3'), T.s3, o3, t, { dy: 0, dur: 0.01 });
+    [['s3a', T.side3a, T.side3b], ['s3b', T.side3b, T.side3c], ['s3c', T.side3c, null]].forEach(function (s) {
+      vis($(s[0]), s[1], o3 > s[1] ? null : null, t, { dy: 16 });
+      $(s[0]).className = s[2] != null && t >= s[2] + 0.2 ? 'dim' : '';
+    });
+
+    // 4 install
+    vis($('tInstall'), T.s4, T.s5 - 0.45, t, { dy: 40 });
+    term('tInstallB', L_INSTALL, t, T.installOut + 0.38 * 8 + 0.4);
+
+    // 5 login
+    vis($('tLogin'), T.s5, T.s6 - 0.45, t, { dy: 40 });
+    term('tLoginB', L_LOGIN, t, T.signedIn + 0.3);
+    vis($('browser'), T.browserIn, T.browserOut, t, { dy: 50, s: 0.96 });
+
+    // 6 connect
+    vis($('tConnect'), T.s6, T.s7 - 0.45, t, { dy: 40 });
+    term('tConnectB', L_CONNECT, t);
+    vis($('finder'), T.finderIn, T.s7 - 0.45, t, { dy: 50, s: 0.96 });
+    var inWs = t >= T.openWs + 0.25;
+    $('fAws').style.display = inWs ? 'none' : ''; $('fWs').style.display = inWs ? '' : 'none';
+    $('finderTitle').textContent = inWs ? 'workspace' : 'aws';
+    $('sbAws').className = inWs ? '' : 'on'; $('sbWs').className = inWs ? 'on' : '';
+    $('icoWs').className = 'ico' + (t >= T.openWs - 0.02 && !inWs ? ' sel' : '');
+    $('icoMine').className = 'ico' + (t >= T.mine ? ' mine' : '');
+    $('icoMine').style.transform = 'scale(' + (1 + 0.08 * Math.sin(Math.PI * seg(t, T.mine, T.mine + 0.5))).toFixed(3) + ')';
+
+    // 7 Datasets
+    vis($('rcon'), T.s7, T.editorIn - 0.3, t, { dy: 40 });
+    term('rconB', t < T.installDuck ? [[0, R + (Math.floor(t * 2) % 2 === 0 ? '<span class="caret"></span>' : '')]] : L_DUCK, t);
+    vis($('duckOnce'), T.installDuck + 0.5, T.editorIn - 0.3, t, { dy: 0, dur: 0.01 });
+    for (var k = 0; k < 3; k++) vis($('once' + k), T.installDuck + 0.5 + 0.35 * k, T.editorIn - 0.3, t, { dy: 12, s: 0.92 });
+    vis($('editor'), T.editorIn, T.s8 - 0.45, t, { dy: 40 });
+    var tab = t >= T.tabR ? 'R' : t >= T.tabPy ? 'Py' : t >= T.tabJl ? 'Jl' : 'R';
+    ['R', 'Jl', 'Py'].forEach(function (k) { $('tab' + k).className = tab === k ? 'on' : ''; });
+    $('edTitle').textContent = { R: 'explore.R', Jl: 'explore.jl', Py: 'explore.py' }[tab] + ' · ~/aws/workspace/ayush.patnaik/income';
+    var codeHtml = CODE[tab].join('\n');
+    if (cache.code !== codeHtml) { $('codeText').innerHTML = codeHtml; cache.code = codeHtml; }
+    var ha = easeOut(seg(t, T.hlConnect, T.hlConnect + 0.4)) * (1 - easeInOut(seg(t, T.hlWhere - 0.2, T.hlWhere + 0.2)));
+    $('hlA').style.top = (16 + 0 * CODE_LINE_H - 2) + 'px'; $('hlA').style.height = (4 * CODE_LINE_H + 4) + 'px'; $('hlA').style.opacity = ha.toFixed(3);
+    var hb = easeOut(seg(t, T.hlWhere, T.hlWhere + 0.4)) * (1 - easeInOut(seg(t, T.result + 0.6, T.result + 1.0)));
+    $('hlB').style.top = (16 + 5 * CODE_LINE_H - 2) + 'px'; $('hlB').style.height = (5 * CODE_LINE_H + 4) + 'px'; $('hlB').style.opacity = hb.toFixed(3);
+    $('edCon').style.opacity = tab === 'R' ? '1' : '0.25';
+    term('edCon', L_RESULT, t);
+
+    // 8 a job
+    var o8 = T.s9 - 0.45;
+    vis($('cLap'), T.s8, o8, t, { dy: 30 });
+    vis($('cBox'), T.boxIn, o8, t, { dy: 30, x: 0 });
+    var bg = easeOut(seg(t, T.band, T.band + 0.6));
+    fadeOnly($('band8'), Math.min(easeOut(seg(t, T.boxIn + 0.3, T.boxIn + 0.9)), 1 - easeInOut(seg(t, o8, o8 + 0.45))));
+    $('band8').style.borderColor = bg > 0.5 ? '#f57d6a' : '#c9c5c1';
+    $('band8').style.transform = 'scaleY(' + (1 + 0.12 * Math.sin(Math.PI * bg)).toFixed(3) + ')';
+    vis($('side8'), T.band - 0.4, o8, t, { dy: 0, dur: 0.01 });
+    vis($('s8a'), T.band - 0.4, null, t, { dy: 14 }); $('s8a').className = t >= T.ghost - 0.4 ? 'dim' : '';
+    vis($('s8b'), T.ghost - 0.4, null, t, { dy: 14 });
+    // the result travels from the container back to the laptop
+    var gp = easeInOut(seg(t, T.ghost, T.ghost + 1.3));
+    var g0 = { x: 1320, y: 300 }, g1 = { x: 470, y: 300 };
+    var gv = seg(t, T.ghost - 0.1, T.ghost + 0.1) * (1 - seg(t, T.ghost + 1.25, T.ghost + 1.45));
+    fadeOnly($('ghost'), gv * (1 - easeInOut(seg(t, o8, o8 + 0.4))));
+    $('ghost').style.transform = 'translate(' + lerp(g0.x, g1.x, gp).toFixed(1) + 'px,' + (lerp(g0.y, g1.y, gp) - 60 * Math.sin(Math.PI * gp)).toFixed(1) + 'px)';
+    $('boxRes').style.visibility = t >= T.ghost - 0.1 ? 'visible' : 'hidden';
+    $('lapRes').style.visibility = t >= T.ghost + 1.3 ? 'visible' : 'hidden';
+
+    // 9 packages
+    var o9 = T.s10 - 0.45;
+    vis($('box9'), T.s9, o9, t, { dy: 30 });
+    vis($('rcon9'), T.cInit - 0.6, o9, t, { dy: 40 });
+    term('rcon9B', L_RENV, t);
+    vis($('lockChip'), T.lock, o9, t, { dy: 10, s: 0.8 });
+    $('lockChip').style.boxShadow = t >= T.lock ? 'inset 0 0 0 2px #1c1c1c, 0 0 0 ' + (8 * Math.sin(Math.PI * seg(t, T.lock, T.lock + 0.7))).toFixed(1) + 'px rgba(245,125,106,.35)' : '';
+    vis($('langs'), T.lock + 0.3, o9, t, { dy: 0, dur: 0.01 });
+    vis($('lgR'), T.lock + 0.3, null, t, { dy: 12 }); vis($('lgJl'), T.langJl, null, t, { dy: 12 }); vis($('lgPy'), T.langPy, null, t, { dy: 12 });
+    vis($('side9'), T.empty, o9, t, { dy: 0, dur: 0.01 });
+    vis($('s9a'), T.empty, null, t, { dy: 14 }); $('s9a').className = t >= T.fly ? 'dim' : '';
+    vis($('s9b'), T.fly, null, t, { dy: 14 });
+    var shelfHtml = SHELF.map(function (n, i) { return '<span class="slot' + (t >= T.fly + 0.18 * i + 0.9 ? ' full' : '') + '">' + n + '</span>'; }).join('');
+    if (cache.shelf !== shelfHtml) { $('shelf').innerHTML = shelfHtml; cache.shelf = shelfHtml; }
+    $('box9note').textContent = t >= T.lit ? 'installed from renv.lock' : 'no packages yet';
+    $('box9').style.boxShadow = t >= T.lit ? '0 0 0 ' + (8 + 8 * Math.sin(Math.PI * seg(t, T.lit, T.lit + 0.8))).toFixed(1) + 'px rgba(245,125,106,.18)' : '';
+    // chips fly from renv.lock up to the shelf
+    var fl = '';
+    SHELF.forEach(function (n, i) {
+      var p = easeInOut(seg(t, T.fly + 0.18 * i, T.fly + 0.18 * i + 0.9));
+      if (p <= 0 || p >= 1 || t > o9) return;
+      var x = lerp(1010, 1030 + (i % 4) * 118, p), y = lerp(425, 140 + Math.floor(i / 4) * 50, p) - 40 * Math.sin(Math.PI * p);
+      fl += '<span class="L flyer" style="left:0;top:0;transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)">' + n + '</span>';
+    });
+    if (cache.fl !== fl) { $('flyers').innerHTML = fl; cache.fl = fl; }
+
+    // 10 run
+    var o10 = T.s11 - 0.45;
+    vis($('tRun'), T.s10, o10, t, { dy: 40 });
+    term('tRunB', L_RUN, t, T.done + 0.18 * JOB.after.length + 0.3);
+    var sz = $('sizeArg'); if (sz) sz.className = t >= T.sizeTag ? 'uline' : '';
+    vis($('sizes'), T.sizeTag, T.lid, t, { dy: 14 });
+    $('szX').className = t >= T.sizeTag + 0.7 ? 'on' : '';
+    // the lid closes over the terminal, then opens on the finished job
+    var lidC = easeInOut(seg(t, T.lid, T.lid + 0.7)), lidO = easeInOut(seg(t, T.lidOpen, T.lidOpen + 0.6));
+    var lid = lidC * (1 - lidO);
+    if (t >= T.s10 && t < o10) {
+      $('tRun').style.transform = 'translateY(' + (-30 * lid).toFixed(1) + 'px) scale(' + (1 - 0.1 * lid).toFixed(4) + ')';
+      $('tRun').style.opacity = (1 - 0.9 * lid).toFixed(3);
+    }
+    vis($('later'), T.later, T.lidOpen - 0.1, t, { dy: 10, s: 0.9 });
+
+    // 11 Zulip
+    vis($('zulip'), T.s11, T.s12 - 0.45, t, { dy: 40 });
+    vis($('zmsg'), T.notice, null, t, { dy: 20, s: 0.97 });
+    var mp = Math.sin(Math.PI * seg(t, T.notice + 0.9, T.notice + 1.5));
+    var mn = $('mention'); if (mn) mn.style.boxShadow = '0 0 0 ' + (6 * mp).toFixed(1) + 'px rgba(245,125,106,.35)';
+
+    // 12 results
+    var o12 = T.s13 - 0.45;
+    vis($('finder12'), T.s12, o12, t, { dy: 40 });
+    vis($('icoRds'), T.png - 0.3, null, t, { dy: 10, s: 0.85 });
+    vis($('icoPng'), T.png, null, t, { dy: 10, s: 0.85 });
+    $('icoPng').className = 'ico' + (t >= T.ql - 0.05 ? ' sel' : '');
+    var qp = easeOut(seg(t, T.ql + 0.1, T.ql + 0.6));
+    var qo = easeInOut(seg(t, o12, o12 + 0.4));
+    fadeOnly($('ql'), qp * (1 - qo));
+    $('ql').style.transform = 'scale(' + lerp(0.25, 1, qp).toFixed(4) + ')';
+    $('ql').style.transformOrigin = '75% 85%';
+
+    // 13 close
+    buildLogo(closePx, T.s13, t);
+    vis($('close'), T.s13, null, t, { dy: 0, dur: 0.01 });
+    vis($('closeH'), T.s13 + 1.1, null, t, { dy: 18 }); vis($('closeSub'), T.s13 + 1.7, null, t, { dy: 14 });
+    var cl = $('closeLogo').querySelectorAll('path');
+
+    // captions
+    var c = null, co = 0;
+    CAPS.forEach(function (x) { var v = easeOut(seg(t, x[0], x[0] + 0.45)) * (1 - easeInOut(seg(t, x[1] - 0.3, x[1]))); if (v > co) { co = v; c = x; } });
+    if (c) { $('capA').textContent = c[2]; $('capB').textContent = c[3]; }
+    fadeOnly($('cap'), co); $('cap').style.transform = 'translateY(' + (10 * (1 - co)).toFixed(1) + 'px)';
+
+    // pointer
+    var on = POINTER_ON.some(function (w) { return t >= w[0] && t < w[1]; });
+    var cp = null;
+    for (var m = 0; m < MOVES.length; m++) {
+      var mv = MOVES[m];
+      if (t < mv[0] - 0.6) break;
+      var tgt = centre(mv[1]);
+      var from = cp || { x: tgt.x + 180, y: tgt.y + 140 };
+      var q = easeInOut(seg(t, mv[0], mv[0] + mv[2]));
+      cp = { x: lerp(from.x, tgt.x, q), y: lerp(from.y, tgt.y, q) - Math.sin(q * Math.PI) * 8 };
+    }
+    if (on && cp) {
+      var press = CLICKS.some(function (ct) { return t >= ct && t < ct + 0.14; }) ? 0.86 : 1;
+      $('cur').style.opacity = '1'; $('cur').style.visibility = 'visible';
+      $('cur').style.transform = 'translate(' + (cp.x - 4).toFixed(1) + 'px,' + (cp.y - 3).toFixed(1) + 'px) scale(' + press + ')';
+      var rv = 0, rs = 1;
+      CLICKS.forEach(function (ct) { var p = seg(t, ct, ct + 0.45); if (p > 0 && p < 1) { rv = 1 - p; rs = 0.5 + 1.1 * p; } });
+      $('ring').style.visibility = 'visible'; $('ring').style.opacity = rv.toFixed(3);
+      $('ring').style.transform = 'translate(' + cp.x.toFixed(1) + 'px,' + cp.y.toFixed(1) + 'px) scale(' + rs.toFixed(3) + ')';
+    } else { $('cur').style.visibility = 'hidden'; $('ring').style.visibility = 'hidden'; }
+  }
+
+  // ---- stage scaling and playback ----
+  var stageWrap = $('stageWrap');
+  function fit() { stage.style.transform = 'scale(' + (stageWrap.clientWidth / STAGE_W) + ')'; if (!playing) show(cur0); }
+  window.addEventListener('resize', fit);
+  var playBtn = $('playBtn'), scrub = $('scrub'), timeEl = $('time');
+  var playing = false, t0 = 0, cur0 = 0, raf = 0;
+  function fmtTime(s) { var m = Math.floor(s / 60), r = s - m * 60; return m + ':' + (r < 10 ? '0' : '') + r.toFixed(1); }
+  function show(t) { cur0 = t; render(t); scrub.value = t.toFixed(2); timeEl.textContent = fmtTime(t) + ' / ' + fmtTime(DUR); }
+  function frame(now) {
+    if (!playing) return;
+    var t = (now - t0) / 1000;
+    if (t >= DUR) { show(DUR - 0.001); pause(); return; }
+    show(t); raf = requestAnimationFrame(frame);
+  }
+  function play() { if (playing) return; playing = true; playBtn.textContent = 'Pause'; if (cur0 >= DUR - 0.01) cur0 = 0; t0 = performance.now() - cur0 * 1000; raf = requestAnimationFrame(frame); }
+  function pause() { playing = false; cancelAnimationFrame(raf); playBtn.textContent = 'Play'; }
+  playBtn.addEventListener('click', function () { playing ? pause() : play(); });
+  $('restartBtn').addEventListener('click', function () { pause(); show(0); play(); });
+  scrub.max = DUR;
+  scrub.addEventListener('input', function () { pause(); show(parseFloat(scrub.value)); });
+  stage.addEventListener('click', function () { playing ? pause() : play(); });
+  $('meta').textContent = 'Saturn V: getting started · 16:9 · ' + fmtTime(DUR) + (window.FILM.voice ? ' · narration timing from ' + window.FILM.voice : ' · timing estimated, no narration yet') + '. The picture only; the narration and music are added to the MP4.';
+
+  // Export hook: window.ad.step(t) renders a frame; ?still=<s> renders one frame and never animates.
+  window.ad = { duration: DUR, drawAt: function (t) { show(t); }, step: function (t) { show(t); } };
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  window.addEventListener('load', fit);
+  fit();
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (params.has('still')) show(parseFloat(params.get('still')) || 0);
+  else if (reduced) show(T.s8 + 2);
+  else show(0);
+})();
+</script>
+</body>
+</html>

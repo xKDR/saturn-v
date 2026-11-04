@@ -20,7 +20,7 @@ const usageText = `saturn: run heavy Julia, R and Python jobs on AWS Fargate fro
 
 Usage:
   saturn login [--use-device-code]      # sign in (IAM Identity Center); lasts up to a week
-  saturn run [-e NAME=VALUE ...] path/to/script.jl|.R|.py [args...]
+  saturn run [--size NAME] [-e NAME=VALUE ...] path/to/script.jl|.R|.py [args...]
   saturn logs <task-id>                 # follow a job's output again
   saturn stop <task-id>
   saturn list                           # running jobs
@@ -33,9 +33,11 @@ The script path is relative to the workspace (~/aws/workspace on your laptop,
 renv.lock in the script's folder, if there is one. Python: from the nearest
 pyproject.toml, a requirements.txt next to the script, or the script's own header.
 
+--size picks the machine: small (1 vCPU, 4 GB), medium (4 vCPU, 16 GB; the default),
+large (8 vCPU, 60 GB), xlarge (16 vCPU, 120 GB) or max (32 vCPU, 244 GB).
 -e sets an environment variable inside the job (repeatable).
-Size and options (env vars): CPU=16384 MEMORY=65536 (default 4 vCPU / 16 GB; up to
-32768 / 249856), SPOT=1 (~70% cheaper, can be interrupted), DETACH=1 (return at once).
+Options (env vars): SPOT=1 (~70% cheaper, can be interrupted), DETACH=1 (return at once),
+CPU=... MEMORY=... (exact Fargate units, instead of a size).
 R jobs run on the R version (major.minor) of the renv.lock next to the script, or the
 newest available; R_VERSION=4.5 chooses one.
 Ctrl-C stops following a job; the job keeps running. Your laptop can sleep meanwhile.
@@ -111,7 +113,7 @@ func run(ctx context.Context, args []string) error {
 		if len(args) != 1 {
 			return fail("usage: saturn cost <task-id>")
 		}
-		_, err := s.recordCost(ctx, args[0])
+		_, err := s.showCost(ctx, args[0])
 		return err
 	case "costs":
 		return s.showCosts(ctx)

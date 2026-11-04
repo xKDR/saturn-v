@@ -8,7 +8,8 @@ cd "$WORKSPACE/$(dirname "$1")" || exit 1
 export SATELLITE="/vsis3/$DATA_BUCKET"
 
 # saturn's helpers (saturn_db() etc.), sent along with the job by `saturn run`.
-printf '%s' "$SATURN_HELPER" >/tmp/saturn.R && export SATURN_R=/tmp/saturn.R
+# (compressed, to fit in ECS's 8 KB of job settings)
+printf '%s' "$SATURN_HELPER" | base64 -d | gzip -dc >/tmp/saturn.R && export SATURN_R=/tmp/saturn.R
 unset SATURN_HELPER
 
 # GDAL (terra, sf: /vsis3/ paths) reads S3 with these; R's own S3 packages use them too.
@@ -25,8 +26,22 @@ Rscript -e 'v <- paste(R.version$major, sub("\\..*", "", R.version$minor), sep =
 if [ -f renv.lock ]; then
   # Keep each project's renv library in the shared cache, not in the project folder.
   export RENV_PATHS_LIBRARY_ROOT=/workspace/.R/renv/library
+  # renv installs from the repository named in renv.lock. Made on a laptop, that's usually
+  # CRAN, which has only source packages for Linux: arrow or sf would then compile for
+  # an hour. The image's repository is Posit Package Manager, which has ready-built Linux
+  # binaries; use its latest snapshot (the image's own is pinned to the date it was built,
+  # older than many lockfiles). Anything still built from source uses every core.
+  # (Passed to restore() itself: a project made with renv::init() sets its repositories
+  # from the lockfile when it starts, over any other setting.)
+  repo=$(Rscript --no-init-file -e 'cat(getOption("repos")[["CRAN"]])') # the image's, not the project's
+  case $repo in
+  */__linux__/*) repos="c(CRAN = '${repo%/*}/latest')" ;;
+  *) repos=NULL ;;
+  esac
+  export MAKEFLAGS="-j$(nproc)"
+  export RENV_DOWNLOAD_METHOD=libcurl # the image has no curl program; R's libcurl is what downloads
   Rscript -e 'if (!requireNamespace("renv", quietly = TRUE)) install.packages("renv")' || exit 1
-  Rscript -e 'renv::restore(project = ".", prompt = FALSE)' || exit 1
+  Rscript -e "renv::restore(project = '.', prompt = FALSE, repos = $repos)" || exit 1
   R_LIBS=$(Rscript -e 'cat(renv::paths$library(project = "."))') && export R_LIBS
 fi
 

@@ -8,7 +8,7 @@ Run heavy Julia, R and Python jobs on AWS from your laptop, with the same code i
 
 You work on your laptop as usual. When a job needs more than your laptop has, `saturn run` sends it to a machine on AWS Fargate (up to 32 cores and 244 GB of memory), streams its output to your terminal, and records what it cost. Your laptop can sleep or disconnect while the job runs.
 
-`saturn connect` gives your laptop the same setup a job has: the shared workspace, the satellite data and the [datasets](#datasets-duckdb), under the same environment variable names. A script you try locally runs unchanged on AWS.
+`saturn connect` gives your laptop the same setup a job has: the shared workspace, the satellite data and the [datasets](#datasets), under the same environment variable names. A script you try locally runs unchanged on AWS.
 
 The AWS side (buckets, cluster, permissions) is managed in [xKDR/AWS-Server](https://github.com/xKDR/AWS-Server).
 
@@ -33,7 +33,7 @@ Then open a new terminal. The installer:
 It's safe to run again. To read it first: `curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | less`.
 
 - **Linux:** the mounts need FUSE (`sudo apt install fuse3` on Debian or Ubuntu; most desktops have it). The installer says if it's missing.
-- **Updates:** `saturn update`, then `saturn disconnect && saturn connect` if you're connected.
+- **Updates:** when a new version is out, saturn asks you to run `saturn update` before anything else (`disconnect`, `stop` and `docs` still work). It reconnects you with the new version if you were connected.
 - **Already cloned this repository?** That keeps working; `saturn update` runs `git pull` there.
 
 ## Each session
@@ -45,7 +45,7 @@ saturn connect
 
 `saturn login` opens your browser to sign in at xKDR's AWS access portal, with your password and MFA. A sign-in lasts **7 days**; saturn says when it's time to sign in again. `saturn connect` then:
 
-- mounts the shared workspace at `~/aws/workspace`, and the satellite data and the [datasets](#datasets-duckdb), read-only, at `~/aws/satellite` and `~/aws/datasets`;
+- mounts the shared workspace at `~/aws/workspace`, and the satellite data, read-only, at `~/aws/satellite`;
 - opens a tunnel to the MariaDB database on `127.0.0.1:3306` (see the [appendix](#appendix-the-mariadb-database));
 - creates **your own folder** in the workspace, `~/aws/workspace/<your user name>` (see [Organising the workspace](#organising-the-workspace));
 - writes the job environment to `~/.config/saturn-v/env` (readable only by you), which new terminals load;
@@ -65,7 +65,7 @@ Everyone shares one workspace, so keep to this layout:
 | --- | --- |
 | `<your user name>/` (e.g. `firstname.lastname/`) | your own work. `saturn connect` creates it; `MY_WORKSPACE` points to it, on your laptop and in your jobs |
 | `shared/<project>/` | work several people use; agree on the folder name with them |
-| `db/`, `costs/`, `.julia/`, `.R/` | used by saturn itself; leave them alone |
+| `db/`, `.julia/`, `.R/` | used by saturn itself; leave them alone |
 
 Anything else at the top level shows up in the Monday summary as "not in anyone's folder".
 
@@ -84,7 +84,6 @@ These variables are set in every job, and on your laptop after `saturn connect`:
 | `WORKSPACE` | `/workspace` | `~/aws/workspace` |
 | `MY_WORKSPACE` | `/workspace/<your user name>` | `~/aws/workspace/<your user name>` |
 | `SATELLITE` | `/vsis3/<bucket>` (read straight from S3) | `~/aws/satellite` |
-| `DATASETS` | `s3://<bucket>` | `~/aws/datasets` |
 | `DATA_BUCKET`, `AWS_REGION` | the satellite bucket and AWS region | the same |
 
 So build paths and connections from them, never from fixed paths:
@@ -117,11 +116,11 @@ Put your script in your own folder in the workspace, for example `~/aws/workspac
 saturn run <you>/project/main.jl
 saturn run <you>/project/analysis.R
 saturn run <you>/project/analysis.py
-CPU=16384 MEMORY=65536 saturn run <you>/project/main.jl
+saturn run --size large <you>/project/main.jl
 saturn run -e START=2014-01 <you>/project/main.jl
 ```
 
-The third line asks for a bigger machine (16 cores, 64 GB); the fourth sets an extra environment variable in the job.
+The fourth line asks for a bigger machine (see the sizes below); the fifth sets an extra environment variable in the job.
 
 - **Julia:** packages come from the `Project.toml` (and `Manifest.toml`) next to the script or in a folder above it.
 - **R:** the image has R 4.6 with terra, sf, GDAL, the tidyverse and more. For anything else, keep an `renv.lock` next to the script; see [R packages with renv](#r-packages-with-renv).
@@ -129,11 +128,15 @@ The third line asks for a bigger machine (16 cores, 64 GB); the fourth sets an e
 - Julia and R packages are cached in the workspace, so only the first run installs them.
 - Anything the job writes under `/workspace/<you>/...` appears in `~/aws/workspace/<you>/...` within a minute or two.
 
-| Size | Settings | Approx. cost per hour |
+| `--size` | Machine | Approx. cost per hour |
 | --- | --- | --- |
-| Default | 4 cores, 16 GB | $0.25 |
-| Large | `CPU=16384 MEMORY=122880` (16 cores, 120 GB) | $1.25 |
-| Largest | `CPU=32768 MEMORY=249856` (32 cores, 244 GB) | $2.50 |
+| `small` | 1 core, 4 GB | $0.06 |
+| `medium` (default) | 4 cores, 16 GB | $0.25 |
+| `large` | 8 cores, 60 GB | $0.62 |
+| `xlarge` | 16 cores, 120 GB | $1.24 |
+| `max` | 32 cores, 244 GB | $2.50 |
+
+For a machine in between, `CPU=` and `MEMORY=` take exact Fargate units instead (e.g. `CPU=8192 MEMORY=32768`).
 
 You pay per second, only while a job runs. `SPOT=1` is about 70% cheaper but AWS may interrupt the job.
 
@@ -206,7 +209,7 @@ Python jobs run with [uv](https://docs.astral.sh/uv/), which installs the packag
 
   ```python
   # /// script
-  # dependencies = ["pandas", "duckdb"]
+  # dependencies = ["pandas", "boto3", "pyarrow"]
   # ///
   ```
 
@@ -225,36 +228,50 @@ saturn costs
 
 When any job ends, its cost is recorded and a summary (who, script, machine, runtime, cost) is posted to the team's Zulip channel, tagging the person who ran it. This happens in AWS, so it works even if your laptop is closed. Every Monday at 09:00 a summary of the past week follows, with jobs and spend per person, and how much each workspace folder stores, when it last changed and its last job.
 
-## Datasets (DuckDB)
+## Datasets
 
-This is where to get data. The datasets are Parquet files in a read-only bucket, laid out for fast filtering, and you query them with DuckDB: a job pulled all-India CPHS income, consumption and member income in under 2 minutes.
+This is where to get data. The datasets are proprietary, so they can only be *queried*, never copied: you send SQL, it runs in AWS (Athena) under your name, and only the result comes back. Every query is recorded with who ran it. The same lines work on your laptop and in a job.
 
-| Dataset | What | Partitioned by | Sorted by |
-| --- | --- | --- | --- |
-| `hhd` | CPHS household survey: `hh_consumption_monthly`, `hh_consumption_weekly`, `hh_income_monthly`, `member_income_monthly`, `people_of_india_wave`, `aspirational_wave`, `hh_char` | `YEAR`, `STATE` | `MONTH_SLOT_DATE`, `DISTRICT` |
+| Dataset | What | Partitioned by |
+| --- | --- | --- |
+| `hhd` | CPHS household survey: `hh_consumption_monthly`, `hh_consumption_weekly`, `hh_income_monthly`, `member_income_monthly`, `people_of_india_wave`, `aspirational_wave`, `hh_char` | `year`, `state` (`hh_char`: `year`) |
+| `fld` | Prowess (`prowess_sa_*`, `prowess_ca_*`), CapEx (`capex_*`), `identity`, `ic_nse_daily`: 127 tables | `year`, for `prowess_sa_annual_expenditure`, `prowess_sa_annual_relatedparty_transaction` and `prowess_sa_daily_stocks`; the rest aren't split |
+| `maps` | Boundaries: `states`, `districts_2011`, `districts_states_hr`, `homogeneous_regions` | |
 
-`DATASETS` is `s3://<bucket>` in a job and `~/aws/datasets` (a read-only mount) on your laptop, so the same code works in both. The tables have the same names and columns as in the MariaDB database they were copied from; `MONTH_SLOT_DATE` is a date and `YEAR` a whole number.
+The tables have the same names and columns as in the MariaDB database they were copied from, in lower case (`prowess_sa_annual_assets_oldschedule6_disclosure`).
 
-**Install DuckDB first.** It's what reads the datasets, and it isn't installed with saturn:
+**Map shapes** are in the `shape` column, in MariaDB's format: 4 bytes, then the standard WKB. Skip the 4 bytes. The coordinates are latitude and longitude (WGS 84). In R, with sf:
+
+```r
+s <- DBI::dbGetQuery(maps, "SELECT st_nm, shape FROM states")
+s$geometry <- sf::st_as_sfc(structure(lapply(s$shape, function(b) as.raw(b)[-(1:4)]), class = "WKB"), crs = 4326)
+s <- sf::st_as_sf(s[c("st_nm", "geometry")])
+```
+
+In Python, `shapely.from_wkb([b[4:] for b in df["shape"]])`. In SQL, `ST_GeomFromBinary(substr(shape, 5))`, e.g. `ST_Area(...)` or `ST_Contains(...)`.
+
+**Install the connector's packages once** (no DuckDB needed):
 
 | | On your laptop (once) | In a job |
 | --- | --- | --- |
-| R | `install.packages(c("duckdb", "dbplyr"))` | Already in the R image (with DBI, dplyr, dbplyr and arrow). With an `renv.lock`, run `renv::snapshot()` after installing |
-| Julia | `]add DuckDB DBInterface DataFrames`, in the project (`julia --project=.`) | Comes from the project's `Project.toml`; the Julia image has no packages |
-| Python | `uv add --script analysis.py duckdb pandas` (or add them to `pyproject.toml` / `requirements.txt`) | Comes from the same list |
+| R | `install.packages(c("paws", "arrow"))` | With an `renv.lock`, start the script with `library(paws)` and `library(arrow)` and run `renv::snapshot()`: renv records only packages your code names |
+| Julia | `]add AWS Parquet2 CSV DataFrames DBInterface`, in the project (`julia --project=.`) | Comes from the project's `Project.toml` |
+| Python | `uv add --script analysis.py boto3 pyarrow pandas` (or add them to `pyproject.toml` / `requirements.txt`) | Comes from the same list |
 
-Then connect with saturn's helper and query the tables by name, with SQL or dplyr. Do this once at the top of a script; the same lines work on your laptop and in a job.
+Then connect with saturn's helper, once at the top of a script:
 
 R:
 
 ```r
+library(paws)
+library(arrow)
 source(Sys.getenv("SATURN_R"))
 con <- saturn_db("hhd")
 
-df <- DBI::dbGetQuery(con, "SELECT YEAR, AVG(TOT_INC) AS avg_income
+df <- DBI::dbGetQuery(con, "SELECT year, AVG(tot_inc) AS avg_income
                             FROM hh_income_monthly
-                            WHERE STATE = 'Karnataka' AND YEAR >= 2022 AND RESPONSE_STATUS = 'Accepted'
-                            GROUP BY YEAR ORDER BY YEAR")
+                            WHERE state = 'Karnataka' AND year >= 2022 AND response_status = 'Accepted'
+                            GROUP BY year ORDER BY year")
 ```
 
 Julia:
@@ -263,7 +280,7 @@ Julia:
 include(ENV["SATURN_JL"])
 con = saturn_db("hhd")
 
-df = DBInterface.execute(con, "SELECT * FROM member_income_monthly WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10") |> DataFrame
+df = DBInterface.execute(con, "SELECT * FROM member_income_monthly WHERE state = 'Karnataka' AND year = 2023 LIMIT 10") |> DataFrame
 ```
 
 Python:
@@ -273,17 +290,25 @@ import os
 exec(open(os.environ["SATURN_PY"]).read())
 con = saturn_db("hhd")
 
-df = con.sql("SELECT * FROM member_income_monthly WHERE STATE = 'Karnataka' AND YEAR = 2023 LIMIT 10").df()   # .df() needs pandas; .pl() polars
+df = con.sql("SELECT * FROM member_income_monthly WHERE state = 'Karnataka' AND year = 2023 LIMIT 10").df()   # .df() pandas; .arrow(); .pl() polars
 ```
 
-`saturn_db()` finds the dataset's tables by itself and makes each one available under its database name. To use several datasets in one query, add them to the same connection: `saturn_db("fld", con = con)`.
+`DBI::dbListTables(con)` (R), `saturn_tables(con)` (Julia) and `con.tables()` (Python) list the tables. A query can use another dataset's tables by name: connected to `hhd`, `SELECT company_name FROM fld.identity WHERE co_code = 11` works.
 
-After that, query the tables with SQL as before, or with dplyr: `tbl(con, "hh_income_monthly") |> filter(STATE == "Karnataka")`.
+The SQL is Athena's (Trino), close to what you know. The differences that come up:
 
-- **Filter on `YEAR` and `STATE`** whenever you can: those skip whole folders. Filters on `MONTH_SLOT_DATE` and `DISTRICT` are fast too.
-- **Do the heavy work in SQL** (joins, date conversions, sorting), not in R, Julia or Python afterwards: DuckDB uses every core. Pull only the result into R, Julia or Python.
-- **On your laptop,** a query reads only the columns and folders it needs, but all-India pulls of many columns are best run as a job.
-- The `hhd` data is a copy of the MariaDB `hhd` database as of 27 Oct 2026. For tables that aren't in the datasets, see the [appendix](#appendix-the-mariadb-database).
+- Strings in single quotes, names in double quotes. Column names come back in lower case (`tot_inc`).
+- `year` is a whole number: `year = 2023`, not `'2023'`.
+- No `ILIKE`: use `lower(state) LIKE '%pradesh%'`. Dates: `date '2023-01-01'`, `date_trunc('month', month_slot_date)`, `year(month_slot_date)`.
+- dplyr's lazy tables don't work here: filter and summarise in SQL, then use dplyr on the result.
+
+Tips:
+
+- **Filter on `year` and `state`** whenever you can: those skip whole folders.
+- **Do the heavy work in SQL** (joins, aggregations): it runs in AWS on many machines, so only the answer travels. A query summarising all of India takes a few seconds.
+- **Large pulls are fine but slower**: half a million rows by 44 columns takes about 5 seconds. Leave out `ORDER BY` on big pulls and sort afterwards; sorted results come back as CSV, unsorted ones as compact Parquet.
+- Each query reads at most 20 GB (the whole of `hhd` is about 5 GB) and costs a fraction of a cent.
+- The data is a copy of the MariaDB databases as of 27 Oct 2026 (`hhd`) and 29 Oct 2026 (`fld`, `maps`). For tables that aren't in the datasets, see the [appendix](#appendix-the-mariadb-database).
 
 ## Good to know
 
@@ -292,7 +317,7 @@ After that, query the tables with SQL as before, or with dplyr: `tbl(con, "hh_in
 
 ## Appendix: the MariaDB database
 
-Use the [datasets](#datasets-duckdb) for everyday work. The `mayin-data` MariaDB database (on Amazon RDS) is still there for tables that aren't in the datasets.
+Use the [datasets](#datasets) for everyday work. The `mayin-data` MariaDB database (on Amazon RDS) is still there for tables that aren't in the datasets.
 
 Jobs and laptops share one database login (`aws_jobs`). It can **only read** the `mayin-data` MariaDB databases (`fld`, `hhd`, `maps`, `tmp`, ...): queries and views, but no inserts, updates, deletes or table changes. Save results to files in the workspace instead. The password is kept in AWS Secrets Manager and reaches your code through `DB_PASSWORD`, so it never appears in a script.
 
@@ -310,7 +335,7 @@ con <- DBI::dbConnect(RMariaDB::MariaDB(),
   host = Sys.getenv("DB_HOST"), port = as.integer(Sys.getenv("DB_PORT")),
   user = Sys.getenv("DB_USER"), password = Sys.getenv("DB_PASSWORD"),
   dbname = "fld", client.flag = RMariaDB::CLIENT_SSL)
-df <- DBI::dbGetQuery(con, "SELECT * FROM some_table LIMIT 10")
+df <- DBI::dbGetQuery(con, "SELECT co_code, company_name FROM identity LIMIT 10")
 DBI::dbDisconnect(con)
 ```
 
@@ -320,7 +345,7 @@ Julia (add `MySQL`, `DBInterface` and `DataFrames` to the `Project.toml`):
 using MySQL, DBInterface, DataFrames
 con = DBInterface.connect(MySQL.Connection, ENV["DB_HOST"], ENV["DB_USER"], ENV["DB_PASSWORD"];
                           port=parse(Int, ENV["DB_PORT"]), db="fld", ssl_mode=:required)
-df = DBInterface.execute(con, "SELECT * FROM some_table LIMIT 10") |> DataFrame
+df = DBInterface.execute(con, "SELECT co_code, company_name FROM identity LIMIT 10") |> DataFrame
 DBInterface.close!(con)
 ```
 

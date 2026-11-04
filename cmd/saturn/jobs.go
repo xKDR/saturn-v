@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,18 +71,83 @@ func (s *session) rTaskDefinition(ctx context.Context, script string) (string, e
 		version, strings.Join(have, ", "))
 }
 
+// A machine size for --size: vCPU, memory in GB, and roughly what an hour costs in Mumbai.
+type machineSize struct {
+	name    string
+	vcpu    int
+	gb      int
+	perHour string
+}
+
+var sizes = []machineSize{
+	{"small", 1, 4, "0.06"},
+	{"medium", 4, 16, "0.25"},
+	{"large", 8, 60, "0.62"},
+	{"xlarge", 16, 120, "1.24"},
+	{"max", 32, 244, "2.50"},
+}
+
+func sizesTable() string {
+	var b strings.Builder
+	b.WriteString("Sizes (saturn run --size <name> ...):\n")
+	for _, z := range sizes {
+		def := ""
+		if z.name == "medium" {
+			def = "   (default)"
+		}
+		fmt.Fprintf(&b, "  %-7s %3d vCPU %4d GB   about $%s an hour%s\n", z.name, z.vcpu, z.gb, z.perHour, def)
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
 func (s *session) runJob(ctx context.Context, args []string) error {
 	var envs []types.KeyValuePair
-	for len(args) >= 1 && args[0] == "-e" {
-		if len(args) < 2 || !strings.Contains(args[1], "=") {
-			return fail("-e needs NAME=VALUE")
+	size := os.Getenv("SIZE")
+	for len(args) >= 1 && (args[0] == "-e" || args[0] == "--size" || args[0] == "-s" || strings.HasPrefix(args[0], "--size=")) {
+		switch {
+		case args[0] == "-e":
+			if len(args) < 2 || !strings.Contains(args[1], "=") {
+				return fail("-e needs NAME=VALUE")
+			}
+			name, value, _ := strings.Cut(args[1], "=")
+			envs = append(envs, types.KeyValuePair{Name: aws.String(name), Value: aws.String(value)})
+			args = args[2:]
+		case strings.HasPrefix(args[0], "--size="):
+			size = strings.TrimPrefix(args[0], "--size=")
+			args = args[1:]
+		default:
+			if len(args) < 2 {
+				return fail("%s", sizesTable())
+			}
+			size = args[1]
+			args = args[2:]
 		}
-		name, value, _ := strings.Cut(args[1], "=")
-		envs = append(envs, types.KeyValuePair{Name: aws.String(name), Value: aws.String(value)})
-		args = args[2:]
 	}
 	if len(args) < 1 {
-		return fail("usage: saturn run [-e NAME=VALUE ...] path/to/script.jl|.R|.py [args...]")
+		return fail("usage: saturn run [--size small|medium|large|xlarge|max] [-e NAME=VALUE ...] path/to/script.jl|.R|.py [args...]")
+	}
+	cpu, memory := os.Getenv("CPU"), os.Getenv("MEMORY")
+	var label string
+	if cpu == "" && memory == "" {
+		if size == "" {
+			size = "medium"
+		}
+		var z *machineSize
+		for i := range sizes {
+			if sizes[i].name == size {
+				z = &sizes[i]
+			}
+		}
+		if z == nil {
+			return fail("no size called '%s'\n%s", size, sizesTable())
+		}
+		cpu, memory = fmt.Sprint(z.vcpu*1024), fmt.Sprint(z.gb*1024)
+		label = fmt.Sprintf("%s: %d vCPU, %d GB", z.name, z.vcpu, z.gb)
+	} else {
+		if size != "" {
+			return fail("use either --size or CPU/MEMORY, not both")
+		}
+		label = fmt.Sprintf("custom: CPU=%s, MEMORY=%s", or(cpu, "default"), or(memory, "default"))
 	}
 	script := args[0]
 	lang, helperFile, err := languageOf(script)
@@ -107,17 +174,25 @@ func (s *session) runJob(ctx context.Context, args []string) error {
 	}
 
 	envs = append([]types.KeyValuePair{{Name: aws.String("MY_WORKSPACE"), Value: aws.String("/workspace/" + strings.ToLower(s.who))}}, envs...)
-	envs = append(envs, types.KeyValuePair{Name: aws.String("SATURN_HELPER"), Value: aws.String(string(helper))})
+	// The helper goes compressed: ECS allows only 8 KB of job settings.
+	var packed bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&packed, gzip.BestCompression)
+	zw.Write(helper)
+	zw.Close()
+	envs = append(envs, types.KeyValuePair{Name: aws.String("SATURN_HELPER"), Value: aws.String(base64.StdEncoding.EncodeToString(packed.Bytes()))},
+		// saturn_db() in the job queries the datasets through Athena.
+		types.KeyValuePair{Name: aws.String("SATURN_ATHENA_WORKGROUP"), Value: aws.String(s.dep.AthenaWorkgroup)},
+		types.KeyValuePair{Name: aws.String("SATURN_ATHENA_RESULTS"), Value: aws.String(s.dep.AthenaResultsBucket)})
 	overrides := &types.TaskOverride{ContainerOverrides: []types.ContainerOverride{{
 		Name:        aws.String(l.Container),
 		Command:     append([]string{"bash", "-c", string(launcher), l.Container}, args...),
 		Environment: envs,
 	}}}
-	if v := os.Getenv("CPU"); v != "" {
-		overrides.Cpu = aws.String(v)
+	if cpu != "" {
+		overrides.Cpu = aws.String(cpu)
 	}
-	if v := os.Getenv("MEMORY"); v != "" {
-		overrides.Memory = aws.String(v)
+	if memory != "" {
+		overrides.Memory = aws.String(memory)
 	}
 
 	startedBy := s.who
@@ -154,13 +229,7 @@ func (s *session) runJob(ctx context.Context, args []string) error {
 		return fail("AWS didn't start the job (%s)", reason)
 	}
 	id := taskID(aws.ToString(out.Tasks[0].TaskArn))
-	fmt.Println("Started job", id)
-
-	// Saved so the cost can still be worked out if nobody is following the job when it ends.
-	if t, _ := s.describe(ctx, id); t != nil {
-		pending, _ := json.Marshal(taskRecord(t))
-		s.putObject(ctx, "costs/pending/"+id+".json", pending)
-	}
+	fmt.Printf("Started job %s (%s)\n", id, label)
 
 	if os.Getenv("DETACH") == "1" {
 		fmt.Println("Follow with: saturn logs", id)
@@ -243,8 +312,8 @@ func (s *session) follow(ctx context.Context, id string) error {
 	}
 	code := *t.Containers[0].ExitCode
 	fmt.Printf("== job stopped: exit code %d (%s)\n", code, aws.ToString(t.StoppedReason))
-	if _, err := s.recordCost(ctx, id); err != nil {
-		fmt.Printf("(couldn't record the cost: %v; retry with: saturn cost %s)\n", err, id)
+	if _, err := s.showCost(ctx, id); err != nil {
+		fmt.Printf("(couldn't work out the cost: %v; see: saturn cost %s)\n", err, id)
 	}
 	if code != 0 {
 		return exitError{code: 1}
@@ -320,8 +389,7 @@ func (s *session) listJobs(ctx context.Context) error {
 	return nil
 }
 
-// taskRecord is the task as the AWS CLI shows it (the fields saturn reads back later),
-// for costs/pending/.
+// taskRecord is the task as the AWS CLI shows it (the fields the cost is worked out from).
 func taskRecord(t *types.Task) map[string]any {
 	r := map[string]any{
 		"taskArn":           aws.ToString(t.TaskArn),
@@ -360,7 +428,11 @@ func taskRecord(t *types.Task) map[string]any {
 // --- The workspace bucket --------------------------------------------------------------
 
 func (s *session) getObject(ctx context.Context, key string) ([]byte, error) {
-	out, err := s3.NewFromConfig(s.cfg).GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.dep.WorkspaceBucket), Key: aws.String(key)})
+	return s.getObjectFrom(ctx, s.dep.WorkspaceBucket, key)
+}
+
+func (s *session) getObjectFrom(ctx context.Context, bucket, key string) ([]byte, error) {
+	out, err := s3.NewFromConfig(s.cfg).GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
 	if err != nil {
 		return nil, err
 	}
@@ -368,10 +440,10 @@ func (s *session) getObject(ctx context.Context, key string) ([]byte, error) {
 	return io.ReadAll(out.Body)
 }
 
-func (s *session) putObject(ctx context.Context, key string, body []byte) error {
-	_, err := s3.NewFromConfig(s.cfg).PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(s.dep.WorkspaceBucket), Key: aws.String(key),
-		Body: bytes.NewReader(body), ContentType: aws.String("application/json"),
-	})
-	return err
+// or returns s, or def if s is empty.
+func or(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }

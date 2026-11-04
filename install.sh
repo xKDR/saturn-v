@@ -97,9 +97,13 @@ if [ -d "$DEST/.git" ]; then
   git -C "$DEST" pull --ff-only --quiet
 else
   say "Installing saturn into $DEST"
-  curl -fsSL "https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz" -o "$tmp/saturn.tar.gz"
+  # The exact commit, so saturn can tell later when there's a newer one (VERSION).
+  sha=$(curl -fsS -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$REPO/commits/$BRANCH" 2>/dev/null) || sha=
+  case $sha in *[!0-9a-f]* | "") sha= ;; esac
+  curl -fsSL "https://github.com/$REPO/archive/${sha:-refs/heads/$BRANCH}.tar.gz" -o "$tmp/saturn.tar.gz"
   mkdir -p "$tmp/saturn" && tar -xzf "$tmp/saturn.tar.gz" -C "$tmp/saturn" --strip-components 1
   [ -x "$tmp/saturn/bin/saturn" ] || die "the download doesn't look like saturn-v"
+  [ -z "$sha" ] || echo "$sha" >"$tmp/saturn/VERSION"
   rm -rf "$DEST.new" && mv "$tmp/saturn" "$DEST.new"
   rm -rf "$DEST" && mv "$DEST.new" "$DEST"
 fi

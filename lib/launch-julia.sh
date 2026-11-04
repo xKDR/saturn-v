@@ -8,7 +8,8 @@ cd "$WORKSPACE/$(dirname "$1")" || exit 1
 export SATELLITE="/vsis3/$DATA_BUCKET"
 
 # saturn's helpers (saturn_db() etc.), sent along with the job by `saturn run`.
-printf '%s' "$SATURN_HELPER" >/tmp/saturn.jl && export SATURN_JL=/tmp/saturn.jl
+# (compressed, to fit in ECS's 8 KB of job settings)
+printf '%s' "$SATURN_HELPER" | base64 -d | gzip -dc >/tmp/saturn.jl && export SATURN_JL=/tmp/saturn.jl
 unset SATURN_HELPER
 # GDAL needs these for /vsis3/; they come from the task role and last about 6 hours.
 creds=$(julia --startup-file=no -e 'using Downloads
