@@ -116,12 +116,30 @@ do_update() {
       SATURN_SKIP_TOOLS=1 SATURN_HOME="$SATURN_HOME" sh
   fi
   installed_version >"$STATE_DIR/latest-version" # what was just installed is the latest
+  show_news
   # Connected? Connect again with the new version, so its environment and helpers are
   # the new ones too (connect keeps mounts and the tunnel that are already up).
   if [[ -f $STATE_DIR/env ]]; then
     echo "Reconnecting with the new version"
     "$SATURN_HOME/bin/saturn" connect >/dev/null
   fi
+}
+
+# --- What's new ---------------------------------------------------------------------
+# After an update, print the NEWS.md entries (each starts "## YYYY-MM-DD: headline",
+# newest first) above the last one this person was shown; the first time, just the
+# newest. The last one shown is remembered in news-seen.
+show_news() {
+  local news="$SATURN_HOME/NEWS.md" seen newest
+  [[ -f $news ]] || return 0
+  seen=$(cat "$STATE_DIR/news-seen" 2>/dev/null || true) # none before the first update
+  awk -v seen="$seen" '
+    /^## / { if ($0 == seen) done = 1; show = !done && (seen != "" || n == 0)
+             if (show && !n++) print "\nWhat'"'"'s new:"
+             if (show) { print "\n  " substr($0, 4); next } }
+    show && NF { print "  " $0 }' "$news"
+  newest=$(grep -m1 '^## ' "$news" || true) # none while NEWS.md has no entries
+  [[ -z $newest ]] || printf '%s\n' "$newest" >"$STATE_DIR/news-seen"
 }
 
 # --- Update notice -----------------------------------------------------------------
