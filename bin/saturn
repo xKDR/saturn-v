@@ -848,6 +848,9 @@ do_status() {
 }
 
 [[ ${1:-} =~ ^(login|connect|status|run|list|logs|cost|costs)$ ]] && require_current "$1"
+# Updated by a saturn older than the news (no news-seen yet): show the newest entry once,
+# on stderr so `eval "$(saturn connect)"` is unaffected.
+[[ -f $STATE_DIR/news-seen || ${1:-} =~ ^(update|__tunnel-keeper)$ ]] || { mkdir -p "$STATE_DIR"; show_news >&2; }
 
 case "$1" in
 login) shift; do_login "$@" ;;
