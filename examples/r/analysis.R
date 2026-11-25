@@ -22,11 +22,12 @@ if (requireNamespace("terra", quietly = TRUE)) {
   cat("Radiance near Delhi, Aug 2022:", v[[1]], "\n")
 }
 
-# Database, with the same code in both places (needs RMariaDB):
-#   con <- DBI::dbConnect(RMariaDB::MariaDB(), host = Sys.getenv("DB_HOST"),
-#                         port = as.integer(Sys.getenv("DB_PORT")), user = Sys.getenv("DB_USER"),
-#                         password = Sys.getenv("DB_PASSWORD"), dbname = "fld",
-#                         client.flag = RMariaDB::CLIENT_SSL)   # the database requires TLS
+# The database, through saturn's helper: the same lines work in both places (needs RMariaDB,
+# which the AWS image has).
+source(Sys.getenv("SATURN_R"))
+con <- saturn_db("fld")
+print(DBI::dbGetQuery(con, "SELECT co_code, company_name FROM identity WHERE co_code IN (11, 12)"))
+DBI::dbDisconnect(con)
 
 writeLines(paste("Hello at", format(Sys.time(), tz = "UTC"), "UTC from", Sys.info()[["nodename"]]), "hello.txt")
 cat("Wrote hello.txt\n")

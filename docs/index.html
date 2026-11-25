@@ -181,11 +181,10 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <li><a class="item" href="#same-code">Same code everywhere</a></li>
       <li><a class="item" href="#run">Running a job</a></li>
       <li><a class="item" href="#packages">Packages</a></li>
-      <li><a class="item" href="#datasets">Data</a></li>
+      <li><a class="item" href="#database">The database</a></li>
       <li><a class="item" href="#jobs">Jobs and costs</a></li>
       <li><a class="item" href="#trouble">When something's off</a></li>
       <li><a class="item" href="#cheatsheet">Cheat sheet</a></li>
-      <li><a class="item" href="#appendix-mariadb">Appendix: MariaDB</a></li>
     </ol>
     <div class="lang-pick">
       <span class="label">Show code in</span>
@@ -219,12 +218,13 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
     <section id="how">
       <h2>How it fits together</h2>
       <p>After <code>saturn connect</code>, your laptop sees the same files and data a job does, under the same names. That's why a script you try locally runs unchanged on AWS.</p>
-      <div class="fit" role="img" aria-label="Your laptop and an AWS job see the same workspace, satellite data and datasets.">
+      <div class="fit" role="img" aria-label="Your laptop and an AWS job see the same workspace, satellite data and database.">
         <div class="box">
           <h4>Your laptop</h4>
           <ul>
             <li><span>Shared workspace</span><span>~/aws/workspace</span></li>
             <li><span>Satellite data (read-only)</span><span>~/aws/satellite</span></li>
+            <li><span>Database</span><span>127.0.0.1:3306</span></li>
           </ul>
         </div>
         <div class="arrow"><b>⇄</b>same names</div>
@@ -233,7 +233,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
           <ul>
             <li><span>Shared workspace</span><span>/workspace</span></li>
             <li><span>Satellite data</span><span>/vsis3/…</span></li>
-            <li><span>Parquet datasets</span><span>s3://…</span></li>
+            <li><span>Database</span><span>mayin-data</span></li>
           </ul>
         </div>
       </div>
@@ -246,7 +246,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <div class="code"><pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | sh</pre></div>
       <p>Then open a new terminal. The installer:</p>
       <ul>
-        <li>installs the tools saturn uses: the AWS command line, rclone (for the mounts) and AWS&#8217;s Session Manager plugin (for the MariaDB tunnel; see the <a href="#appendix-mariadb">appendix</a>). On a Mac through <a href="https://brew.sh">Homebrew</a> (install that first); on Linux into <code>~/.local</code>, without sudo;</li>
+        <li>installs the tools saturn uses: the AWS command line, rclone (for the mounts) and AWS&#8217;s Session Manager plugin (for the <a href="#database">database</a> tunnel). On a Mac through <a href="https://brew.sh">Homebrew</a> (install that first); on Linux into <code>~/.local</code>, without sudo;</li>
         <li>puts saturn in <code>~/.saturn-v</code> and on your PATH;</li>
         <li>adds two lines to your shell&#8217;s startup file, marked <code># saturn-v</code>.</li>
       </ul>
@@ -264,7 +264,7 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
       <p><code>saturn connect</code> does four things:</p>
       <ul>
         <li>mounts the shared workspace at <code>~/aws/workspace</code>, and the satellite data (read-only) at <code>~/aws/satellite</code>;</li>
-        <li>opens a tunnel to the MariaDB database on <code>127.0.0.1:3306</code> (see the <a href="#appendix-mariadb">appendix</a>), and reopens it in the background if it drops;</li>
+        <li>opens a tunnel to the <a href="#database">database</a> on <code>127.0.0.1:3306</code>, and reopens it in the background if it drops;</li>
         <li>creates your own folder, <code>~/aws/workspace/&lt;your user name&gt;</code>;</li>
         <li>writes the job's environment variables to <code>~/.config/saturn-v/env</code>, which new terminals load;</li>
               </ul>
@@ -295,6 +295,8 @@ footer { margin-top: 32px; font-size: var(--step--1); color: var(--muted); }
           <tr><td><code>WORKSPACE</code></td><td><code>/workspace</code></td><td><code>~/aws/workspace</code></td></tr>
           <tr><td><code>MY_WORKSPACE</code></td><td><code>/workspace/&lt;you&gt;</code></td><td><code>~/aws/workspace/&lt;you&gt;</code></td></tr>
           <tr><td><code>SATELLITE</code></td><td><code>/vsis3/&lt;bucket&gt;</code>, read straight from S3</td><td><code>~/aws/satellite</code></td></tr>
+          <tr><td><code>DB_HOST</code>, <code>DB_PORT</code></td><td>the database</td><td><code>127.0.0.1</code> and the tunnel port</td></tr>
+          <tr><td><code>DB_USER</code>, <code>DB_PASSWORD</code></td><td colspan="2">the shared, read-only <code>aws_jobs</code> login</td></tr>
         </tbody>
       </table></div>
       <h3>Reading a satellite file</h3>
@@ -409,7 +411,7 @@ renv::restore()                   <span class="c"># install what renv.lock lists
           <h3>Start a project (once)</h3>
           <div class="code"><pre><span class="p">$ </span>cd ~/aws/workspace/&lt;you&gt;/project
 <span class="p">$ </span>julia --project=.
-julia&gt; ]add AWS Parquet2 DataFrames CSV</pre></div>
+julia&gt; ]add MySQL DBInterface DataFrames CSV</pre></div>
           <p><code>--project=.</code> makes this folder the active project, so <code>add</code> writes <code>Project.toml</code> (the packages you use) and <code>Manifest.toml</code> (exact versions of everything). Keep both in the folder: the job installs from the Manifest.</p>
 
           <h3>Run with the project</h3>
@@ -418,7 +420,7 @@ julia&gt; ]add AWS Parquet2 DataFrames CSV</pre></div>
           <p>A <code>Project.toml</code> in a folder above the script works too, so several scripts can share one project.</p>
 
           <h3>The usual mistake</h3>
-          <p>Adding a package after starting plain <code>julia</code> (without <code>--project</code>) puts it in your personal environment, not the project's. It works on your laptop but the job fails with <i>Package AWS not found in current path</i>. Check which project is active, and what it has:</p>
+          <p>Adding a package after starting plain <code>julia</code> (without <code>--project</code>) puts it in your personal environment, not the project's. It works on your laptop but the job fails with <i>Package MySQL not found in current path</i>. Check which project is active, and what it has:</p>
           <div class="code"><pre>julia&gt; ]status          <span class="c"># first line shows the active Project.toml</span>
 julia&gt; ]activate .      <span class="c"># switch to this folder's project if it's the wrong one</span></pre></div>
 
@@ -434,37 +436,37 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
           <p>Python jobs run with <a href="https://docs.astral.sh/uv/">uv</a>, which installs your packages (and the Python version you ask for; 3.13 otherwise) in a few seconds at the start of every job. Install it on your laptop with <code>brew install uv</code>.</p>
 
           <h3>A single script: list packages in its header</h3>
-          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py pandas boto3 pyarrow</pre></div>
+          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py pandas pymysql</pre></div>
           <p>That writes this at the top of the script, which is all the job needs:</p>
           <div class="code"><pre># /// script
-# dependencies = ["pandas", "boto3", "pyarrow"]
+# dependencies = ["pandas", "pymysql"]
 # ///</pre></div>
           <p>Run it with <code>uv run analysis.py</code> on your laptop and <code>saturn run &lt;you&gt;/analysis.py</code> on AWS. This is the simplest choice for code in the workspace: uv keeps the installed packages in its own cache, not in your folder.</p>
 
           <h3>A project with several scripts</h3>
           <div class="code"><pre><span class="p">$ </span>cd ~/aws/workspace/&lt;you&gt;/project
 <span class="p">$ </span>uv init --bare
-<span class="p">$ </span>uv add pandas boto3 pyarrow</pre></div>
+<span class="p">$ </span>uv add pandas pymysql</pre></div>
           <p>This writes <code>pyproject.toml</code> (what you use) and <code>uv.lock</code> (exact versions); keep both. uv also makes a <code>.venv</code> folder here, which is slow on the shared workspace, so prefer the script header when you can. A <code>requirements.txt</code> next to the script works as well.</p>
           <p>rasterio, geopandas and pyogrio come with their own GDAL, so nothing else is needed for the satellite data.</p>
         </div>
       </div>
     </section>
 
-    <section id="datasets">
-      <h2>Data</h2>
-      <p>This is where to get data. The datasets are proprietary, so they can only be <i>queried</i>, never copied: you send SQL, it runs in AWS under your name, and only the result comes back. Every query is recorded with who ran it. The same lines work on your laptop and in a job.</p>
+    <section id="database">
+      <h2>The database</h2>
+      <p>The data is in <code>mayin-data</code>, a MariaDB database on Amazon RDS. The same lines work on your laptop (through the tunnel) and in a job.</p>
       <div class="table"><table>
-        <thead><tr><th>Dataset</th><th>Tables</th><th>Split by</th></tr></thead>
+        <thead><tr><th>Database</th><th>What</th></tr></thead>
         <tbody>
-          <tr><td><code>hhd</code></td><td>CPHS: <code>hh_income_monthly</code>, <code>hh_consumption_monthly</code>, <code>hh_consumption_weekly</code>, <code>member_income_monthly</code>, <code>people_of_india_wave</code>, <code>aspirational_wave</code>, <code>hh_char</code></td><td><code>year</code>, <code>state</code></td></tr>
-          <tr><td><code>fld</code></td><td>Prowess (<code>prowess_sa_*</code>, <code>prowess_ca_*</code>), CapEx (<code>capex_*</code>), <code>identity</code>, <code>ic_nse_daily</code>: 127 tables</td><td><code>year</code>, for three tables: <code>prowess_sa_annual_expenditure</code>, <code>prowess_sa_annual_relatedparty_transaction</code>, <code>prowess_sa_daily_stocks</code></td></tr>
-          <tr><td><code>maps</code></td><td>Boundaries: <code>states</code>, <code>districts_2011</code>, <code>districts_states_hr</code>, <code>homogeneous_regions</code></td><td></td></tr>
+          <tr><td><code>hhd</code></td><td>CPHS: <code>hh_income_monthly</code>, <code>member_income_monthly</code>, <code>hh_consumption_monthly</code>, <code>hh_consumption_weekly</code>, <code>people_of_india_wave</code>, <code>aspirational_wave</code>, <code>hh_char</code></td></tr>
+          <tr><td><code>fld</code></td><td>Prowess (<code>prowess_sa_*</code>, <code>prowess_ca_*</code>), CapEx (<code>capex_*</code>), <code>identity</code>, <code>ic_nse_daily</code>: 127 tables</td></tr>
+          <tr><td><code>maps</code></td><td>Boundaries: <code>states</code>, <code>districts_2011</code>, <code>districts_states_hr</code>, <code>homogeneous_regions</code></td></tr>
+          <tr><td><code>tmp</code></td><td>Scratch tables</td></tr>
         </tbody>
       </table></div>
-      <p>Table and column names are as in the MariaDB databases, in lower case.</p>
-      <h3>Install the connector once</h3>
-      <p>You don&#8217;t need DuckDB. Install these on your laptop once; jobs need them too:</p>
+      <p>Jobs and laptops share one login, <code>aws_jobs</code>, which can only <b>read</b>. Save results as files in the workspace. The password reaches your code through <code>DB_PASSWORD</code>, so it never appears in a script.</p>
+      <h3>Install the package once</h3>
       <div class="tabs" data-group="lang">
         <div class="tablist" role="tablist" aria-label="Language">
           <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
@@ -472,21 +474,20 @@ julia&gt; ]instantiate          <span class="c"># install what Manifest.toml lis
           <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
         </div>
         <div class="tabpanel" data-key="r" role="tabpanel">
-          <div class="code"><pre>install.packages(c("paws", "arrow"))</pre></div>
-          <p>If your project uses renv, start the script with <code>library(paws)</code> and <code>library(arrow)</code> and run <code>renv::snapshot()</code>. renv records only the packages your code names; without those lines, the job won&#8217;t have them.</p>
+          <div class="code"><pre>install.packages(c("RMariaDB", "dbplyr"))</pre></div>
+          <p>Jobs already have both: the R image includes them. If your project uses renv, keep <code>library(RMariaDB)</code> at the top of the script and run <code>renv::snapshot()</code>.</p>
         </div>
         <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
           <div class="code"><pre><span class="p">$ </span>julia --project=.
-julia&gt; ]add AWS Parquet2 CSV DataFrames DBInterface</pre></div>
+julia&gt; ]add MySQL DBInterface DataFrames</pre></div>
           <p>This records them in the project&#8217;s <code>Project.toml</code>, which is where the job gets them: the Julia image has no packages of its own.</p>
         </div>
         <div class="tabpanel" data-key="python" role="tabpanel" hidden>
-          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py boto3 pyarrow pandas</pre></div>
+          <div class="code"><pre><span class="p">$ </span>uv add --script analysis.py pymysql pandas</pre></div>
           <p>The job installs what the script lists. In a project, add them to <code>pyproject.toml</code> or <code>requirements.txt</code> instead.</p>
         </div>
       </div>
       <h3>Connect and query</h3>
-      <p>saturn&#8217;s helper connects you with one line. The same lines work on your laptop and in a job.</p>
       <div class="tabs" data-group="lang">
         <div class="tablist" role="tablist" aria-label="Language">
           <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
@@ -494,43 +495,49 @@ julia&gt; ]add AWS Parquet2 CSV DataFrames DBInterface</pre></div>
           <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
         </div>
         <div class="tabpanel" data-key="r" role="tabpanel">
-          <div class="code"><pre>library(paws)
-library(arrow)
-source(Sys.getenv("SATURN_R"))
-con &lt;- saturn_db("hhd")
+          <div class="code"><pre>source(Sys.getenv("SATURN_R"))
+con &lt;- saturn_db("fld")
 
-df &lt;- DBI::dbGetQuery(con, "
-  SELECT year, AVG(tot_inc) AS avg_income
-  FROM hh_income_monthly
-  WHERE state = 'Karnataka' AND year &gt;= 2022 AND response_status = 'Accepted'
-  GROUP BY year ORDER BY year")
+df &lt;- DBI::dbGetQuery(con, "SELECT co_code, company_name FROM identity WHERE co_code IN (11, 12)")
 
-DBI::dbListTables(con)</pre></div>
+<span class="c"># or with dplyr: it writes the SQL, and only the result comes back</span>
+library(dplyr)
+x &lt;- tbl(con, "identity") |&gt; filter(co_code == 11) |&gt; select(co_code, company_name) |&gt; collect()
+
+DBI::dbListTables(con)
+DBI::dbDisconnect(con)</pre></div>
         </div>
         <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
-          <div class="code"><pre>include(ENV["SATURN_JL"])
-con = saturn_db("hhd")
+          <div class="code"><pre>using DataFrames
+include(ENV["SATURN_JL"])
+con = saturn_db("fld")
 
-df = DBInterface.execute(con, """
-  SELECT * FROM member_income_monthly
-  WHERE state = 'Karnataka' AND year = 2023 LIMIT 10""") |&gt; DataFrame
+df = DBInterface.execute(con, "SELECT co_code, company_name FROM identity WHERE co_code IN (11, 12)") |&gt; DataFrame
 
-saturn_tables(con)</pre></div>
+saturn_tables(con)
+DBInterface.close!(con)</pre></div>
         </div>
         <div class="tabpanel" data-key="python" role="tabpanel" hidden>
           <div class="code"><pre>import os
 exec(open(os.environ["SATURN_PY"]).read())
-con = saturn_db("hhd")
+con = saturn_db("fld")
 
-df = con.sql("""
-  SELECT * FROM member_income_monthly
-  WHERE state = 'Karnataka' AND year = 2023 LIMIT 10""").df()   <span class="c"># .arrow(), .pl()</span>
+df = con.sql("SELECT co_code, company_name FROM identity WHERE co_code IN (11, 12)").df()   <span class="c"># .pl() polars</span>
 
-con.tables()</pre></div>
+con.tables()
+con.close()</pre></div>
         </div>
       </div>
+      <p>A query can use another database&#8217;s tables by name: connected to <code>hhd</code>, <code>SELECT company_name FROM fld.identity WHERE co_code = 11</code> works.</p>
+      <h3>The SQL</h3>
+      <ul>
+        <li>It&#8217;s MariaDB&#8217;s (MySQL&#8217;s).</li>
+        <li>Column names are as stored, mostly in capitals (<code>STATE</code>, <code>YEAR</code>, <code>TOT_INC</code>), and come back that way: <code>df$TOT_INC</code>, not <code>df$tot_inc</code>. In SQL itself, case doesn&#8217;t matter.</li>
+      </ul>
+      <div class="note warn"><span class="tag">Slow for now</span><p>Most <code>hhd</code> tables have no indexes yet, so a query reads the whole table even when it asks for one state: counting Karnataka&#8217;s rows in <code>hh_income_monthly</code> (12 GB) takes about 4 minutes, and <code>member_income_monthly</code> is 59 GB. Run big <code>hhd</code> queries as a job and save the result to the workspace; explore with <code>LIMIT</code> first; do joins and aggregations in SQL. <code>fld</code> and <code>maps</code> answer quickly.</p></div>
       <h3>Maps</h3>
-      <p>The <code>maps</code> tables keep each boundary in a <code>shape</code> column, in MariaDB&#8217;s format: 4 bytes, then the standard WKB. Skip the 4 bytes. The coordinates are latitude and longitude (WGS 84).</p>
+      <p>The <code>maps</code> tables keep each boundary in a <code>SHAPE</code> geometry column (latitude and longitude, WGS 84). MariaDB&#8217;s spatial functions work on it directly. Which state is Bengaluru in?</p>
+      <div class="code"><pre>SELECT st_nm FROM states WHERE ST_Contains(SHAPE, POINT(77.59, 12.97))   <span class="c">-- Karnataka</span></pre></div>
       <div class="tabs" data-group="lang">
         <div class="tablist" role="tablist" aria-label="Language">
           <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
@@ -542,19 +549,18 @@ con.tables()</pre></div>
           <div class="code"><pre>source(Sys.getenv("SATURN_R"))
 maps &lt;- saturn_db("maps")
 
-s &lt;- DBI::dbGetQuery(maps, "SELECT st_nm, shape FROM states")
-s$geometry &lt;- sf::st_as_sfc(structure(lapply(s$shape, function(b) as.raw(b)[-(1:4)]), class = "WKB"), crs = 4326)
-s &lt;- sf::st_as_sf(s[c("st_nm", "geometry")])
+s &lt;- DBI::dbGetQuery(maps, "SELECT st_nm, ST_AsBinary(SHAPE) AS wkb FROM states")
+s &lt;- sf::st_as_sf(data.frame(st_nm = s$st_nm),
+                  geometry = sf::st_as_sfc(structure(s$wkb, class = "WKB"), crs = 4326))
 plot(sf::st_geometry(s))</pre></div>
         </div>
         <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
-          <p>Work with the shapes in SQL, which runs in AWS:</p>
+          <p>Work with the shapes in SQL:</p>
           <div class="code"><pre>include(ENV["SATURN_JL"])
 maps = saturn_db("maps")
 
-df = DBInterface.execute(maps, """
-  SELECT st_nm FROM states
-  WHERE ST_Contains(ST_GeomFromBinary(substr(shape, 5)), ST_Point(77.59, 12.97))""") |&gt; DataFrame   <span class="c"># Karnataka</span></pre></div>
+df = DBInterface.execute(maps,
+  "SELECT st_nm FROM states WHERE ST_Contains(SHAPE, POINT(77.59, 12.97))") |&gt; DataFrame   <span class="c"># Karnataka</span></pre></div>
         </div>
         <div class="tabpanel" data-key="python" role="tabpanel" hidden>
           <p>With shapely (<code>uv add shapely</code>):</p>
@@ -562,28 +568,12 @@ df = DBInterface.execute(maps, """
 exec(open(os.environ["SATURN_PY"]).read())
 maps = saturn_db("maps")
 
-df = maps.sql("SELECT st_nm, shape FROM states").df()
-df["geometry"] = shapely.from_wkb([b[4:] for b in df["shape"]])</pre></div>
+df = maps.sql("SELECT st_nm, ST_AsBinary(SHAPE) AS wkb FROM states").df()
+df["geometry"] = shapely.from_wkb(df["wkb"])</pre></div>
         </div>
       </div>
-      <p>In any language, SQL can work with the shapes directly: <code>ST_GeomFromBinary(substr(shape, 5))</code> turns one into a geometry, for <code>ST_Contains</code>, <code>ST_Intersects</code>, <code>ST_Area</code> and the like.</p>
-      <h3>The SQL</h3>
-      <p>It&#8217;s Athena&#8217;s (Trino), close to what you know. The differences that come up:</p>
-      <ul>
-        <li>Strings in single quotes, names in double quotes. Column names come back in lower case (<code>tot_inc</code>).</li>
-        <li><code>year</code> is a whole number: <code>year = 2023</code>, not <code>'2023'</code>.</li>
-        <li>No <code>ILIKE</code>: use <code>lower(state) LIKE '%pradesh%'</code>. Dates: <code>date '2023-01-01'</code>, <code>date_trunc('month', month_slot_date)</code>, <code>year(month_slot_date)</code>.</li>
-        <li>dplyr&#8217;s lazy tables don&#8217;t work here: filter and summarise in SQL, then use dplyr on the result.</li>
-        <li>Another dataset&#8217;s tables by name: connected to <code>hhd</code>, <code>SELECT company_name FROM fld.identity WHERE co_code = 11</code> works.</li>
-      </ul>
-      <h3>Tips</h3>
-      <ul>
-        <li><b>Filter on <code>year</code> and <code>state</code></b> whenever you can: those skip whole folders.</li>
-        <li><b>Do the heavy work in SQL</b> (joins, aggregations): it runs in AWS on many machines, so only the answer travels. A query summarising all of India takes a few seconds.</li>
-        <li><b>Large pulls are fine but slower:</b> half a million rows by 44 columns takes about 5 seconds. Leave out <code>ORDER BY</code> on big pulls and sort afterwards.</li>
-        <li>Each query reads at most 20 GB (all of <code>hhd</code> is about 5 GB) and costs a fraction of a cent.</li>
-        <li>The data is a copy of the MariaDB databases as of 27 Oct 2026 (<code>hhd</code>) and 29 Oct 2026 (<code>fld</code>, <code>maps</code>). For tables that aren't in the datasets, see the <a href="#appendix-mariadb">appendix</a>.</li>
-      </ul>
+      <h3>Other clients</h3>
+      <p>The database only accepts encrypted connections; <code>saturn_db()</code> asks for that. Other clients (DBeaver, TablePlus, Sequel Ace, <code>mysql</code>) work through the tunnel too: host <code>127.0.0.1</code>, port <code>3306</code>, user and password from <code>~/.config/saturn-v/env</code>. The tunnel goes through a small server on AWS, which <code>saturn connect</code> starts if it&#8217;s stopped.</p>
     </section>
 
     <section id="jobs">
@@ -601,6 +591,8 @@ df["geometry"] = shapely.from_wkb([b[4:] for b in df["shape"]])</pre></div>
       <details><summary>The job doesn't have a package I installed</summary><div><p>R: run <code>renv::snapshot()</code> after <code>install.packages()</code>, and check with <code>renv::status()</code>. Julia: start Julia with <code>--project=.</code> before <code>]add</code>; <code>]status</code> shows which project is active. Python: add it to the header, <code>pyproject.toml</code> or <code>requirements.txt</code>. See <a href="#packages">Packages</a>.</p></div></details>
       <details><summary>"R 4.x is not available on AWS"</summary><div><p>Your <code>renv.lock</code> was made with an R version AWS doesn't offer. Upgrade R on your laptop, then run <code>renv::update()</code> and <code>renv::snapshot()</code>.</p></div></details>
       <details><summary>A job's output file isn't on my laptop yet</summary><div><p>Files written by a job take a minute or two to appear in <code>~/aws/workspace</code>.</p></div></details>
+      <details><summary>"Connections using insecure transport are prohibited"</summary><div><p>You connected to the database yourself without encryption. Use <code>saturn_db()</code>, or add <code>client.flag = RMariaDB::CLIENT_SSL</code> in R, <code>ssl_mode=:required</code> in Julia.</p></div></details>
+      <details><summary>Port 3306 is already in use</summary><div><p>Something on your laptop (a local MySQL, say) uses it. Connect with <code>DB_LOCAL_PORT=13306 saturn connect</code>; <code>DB_PORT</code> then says 13306.</p></div></details>
       <details><summary>saturn asks me to sign in</summary><div><p>Your weekly sign-in expired. Run <code>saturn login</code>, then carry on.</p></div></details>
     </section>
 
@@ -620,55 +612,6 @@ df["geometry"] = shapely.from_wkb([b[4:] for b in df["shape"]])</pre></div>
         <div><code>saturn costs</code><span>Spending per month and person</span></div>
         <div><code>saturn docs</code><span>Open this guide</span></div>
       </div>
-    </section>
-    <section id="appendix-mariadb">
-      <h2>Appendix: the MariaDB database</h2>
-      <p>Use the <a href="#datasets">datasets</a> for everyday work. The <code>mayin-data</code> MariaDB database (on Amazon RDS) is still there for tables that aren&#8217;t in the datasets.</p>
-      <p>Jobs and laptops share one login, <code>aws_jobs</code>, which can only <b>read</b> the <code>mayin-data</code> MariaDB databases (<code>fld</code>, <code>hhd</code>, <code>maps</code>, …). Save results as files in the workspace. The password reaches your code through <code>DB_PASSWORD</code>, so it never appears in a script.</p>
-      <div class="table"><table>
-        <thead><tr><th>Variable</th><th>In a job</th><th>On your laptop</th></tr></thead>
-        <tbody>
-          <tr><td><code>DB_HOST</code>, <code>DB_PORT</code></td><td>the database</td><td><code>127.0.0.1</code> and the tunnel port</td></tr>
-          <tr><td><code>DB_USER</code>, <code>DB_PASSWORD</code></td><td colspan="2">the shared, read-only <code>aws_jobs</code> login</td></tr>
-        </tbody>
-      </table></div>
-      <div class="tabs" data-group="lang">
-        <div class="tablist" role="tablist" aria-label="Language">
-          <button type="button" role="tab" data-key="r" aria-selected="true">R</button>
-          <button type="button" role="tab" data-key="julia" aria-selected="false">Julia</button>
-          <button type="button" role="tab" data-key="python" aria-selected="false">Python</button>
-        </div>
-        <div class="tabpanel" data-key="r" role="tabpanel">
-          <div class="code"><pre>con &lt;- DBI::dbConnect(RMariaDB::MariaDB(),
-  host = Sys.getenv("DB_HOST"), port = as.integer(Sys.getenv("DB_PORT")),
-  user = Sys.getenv("DB_USER"), password = Sys.getenv("DB_PASSWORD"),
-  dbname = "fld", client.flag = RMariaDB::CLIENT_SSL)
-df &lt;- DBI::dbGetQuery(con, "SELECT co_code, company_name FROM identity LIMIT 10")
-DBI::dbDisconnect(con)</pre></div>
-        </div>
-        <div class="tabpanel" data-key="julia" role="tabpanel" hidden>
-          <div class="code"><pre>using MySQL, DBInterface, DataFrames
-con = DBInterface.connect(MySQL.Connection, ENV["DB_HOST"], ENV["DB_USER"], ENV["DB_PASSWORD"];
-                          port=parse(Int, ENV["DB_PORT"]), db="fld", ssl_mode=:required)
-df = DBInterface.execute(con, "SELECT co_code, company_name FROM identity LIMIT 10") |&gt; DataFrame
-DBInterface.close!(con)</pre></div>
-        </div>
-        <div class="tabpanel" data-key="python" role="tabpanel" hidden>
-          <div class="code"><pre><span class="c"># add pymysql and pandas to the script's packages</span>
-import os, pymysql, pandas as pd
-con = pymysql.connect(host=os.environ["DB_HOST"], port=int(os.environ["DB_PORT"]),
-                      user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"],
-                      database="fld", ssl={"ssl": {}})
-with con.cursor() as cur:
-    cur.execute("SELECT co_code, company_name FROM identity LIMIT 10")
-    df = pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
-con.close()</pre></div>
-        </div>
-      </div>
-      <p>The database only accepts encrypted connections, which is what the SSL options above ask for. Other clients (DBeaver, TablePlus, <code>mysql</code>) work too: host <code>127.0.0.1</code>, port <code>3306</code>, user and password from <code>~/.config/saturn-v/env</code>.</p>
-      <details><summary>"Connections using insecure transport are prohibited"</summary><div><p>Add the SSL option: <code>client.flag = RMariaDB::CLIENT_SSL</code> in R, <code>ssl_mode=:required</code> in Julia.</p></div></details>
-      <details><summary>Port 3306 is already in use</summary><div><p>Something on your laptop (a local MySQL, say) uses it. Connect with <code>DB_LOCAL_PORT=13306 saturn connect</code>; <code>DB_PORT</code> then says 13306.</p></div></details>
-      <p>The tunnel goes through a small server on AWS, which <code>saturn connect</code> starts if it&#8217;s stopped.</p>
       <footer>The full reference is the <a href="https://github.com/xKDR/saturn-v">saturn-v README</a>. Questions go to the team's Zulip channel.</footer>
     </section>
 

@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["rasterio", "boto3", "pyarrow", "pandas"]
+# dependencies = ["rasterio", "pymysql", "pandas"]
 # ///
 #
 # A first job. The same file runs on your laptop (after `saturn connect`) and on AWS:
@@ -32,11 +32,11 @@ f = os.path.join(os.environ["SATELLITE"], "ntl/sl/rad",
 with rasterio.open(f) as r:
     print("Radiance near Delhi, Aug 2022:", next(r.sample([(77.2, 28.6)]))[0])
 
-# The datasets, queried through saturn's helper (the query runs in AWS; only the answer comes back).
+# The database, through saturn's helper: the same lines work in both places.
 exec(open(os.environ["SATURN_PY"]).read())
-con = saturn_db("hhd")
-print(con.sql("SELECT year, COUNT(*) AS households FROM hh_income_monthly "
-              "WHERE state = 'Karnataka' AND year BETWEEN 2014 AND 2016 GROUP BY year ORDER BY year").df())
+con = saturn_db("fld")
+print(con.sql("SELECT co_code, company_name FROM identity WHERE co_code IN (11, 12)").df())
+con.close()
 
 with open("hello.txt", "w") as out:
     out.write("Hello at %s UTC from %s\n" % (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), platform.node()))

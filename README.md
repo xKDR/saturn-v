@@ -8,7 +8,7 @@ Run heavy Julia, R and Python jobs on AWS from your laptop, with the same code i
 
 You work on your laptop as usual. When a job needs more than your laptop has, `saturn run` sends it to a machine on AWS Fargate (up to 32 cores and 244 GB of memory), streams its output to your terminal, and records what it cost. Your laptop can sleep or disconnect while the job runs.
 
-`saturn connect` gives your laptop the same setup a job has: the shared workspace, the satellite data and the [datasets](#datasets), under the same environment variable names. A script you try locally runs unchanged on AWS.
+`saturn connect` gives your laptop the same setup a job has: the shared workspace, the satellite data and the [database](#the-database), under the same environment variable names. A script you try locally runs unchanged on AWS.
 
 The AWS side (buckets, cluster, permissions) is managed in [xKDR/AWS-Server](https://github.com/xKDR/AWS-Server).
 
@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/xKDR/saturn-v/main/install.sh | sh
 
 Then open a new terminal. The installer:
 
-- installs the tools saturn uses: the AWS CLI, rclone (for the mounts) and AWS's Session Manager plugin (for the MariaDB tunnel; see the [appendix](#appendix-the-mariadb-database)). On a Mac through [Homebrew](https://brew.sh) (install that first if you don't have it); on Linux into `~/.local`, without sudo;
+- installs the tools saturn uses: the AWS CLI, rclone (for the mounts) and AWS's Session Manager plugin (for the [database](#the-database) tunnel). On a Mac through [Homebrew](https://brew.sh) (install that first if you don't have it); on Linux into `~/.local`, without sudo;
 - puts saturn in `~/.saturn-v` and on your PATH;
 - adds two lines to your shell's startup file (marked `# saturn-v`): `~/.local/bin` on the PATH, and the job environment while you're connected.
 
@@ -46,7 +46,7 @@ saturn connect
 `saturn login` opens your browser to sign in at xKDR's AWS access portal, with your password and MFA. A sign-in lasts **7 days**; saturn says when it's time to sign in again. `saturn connect` then:
 
 - mounts the shared workspace at `~/aws/workspace`, and the satellite data, read-only, at `~/aws/satellite`;
-- opens a tunnel to the MariaDB database on `127.0.0.1:3306` (see the [appendix](#appendix-the-mariadb-database));
+- opens a tunnel to the [database](#the-database) on `127.0.0.1:3306`;
 - creates **your own folder** in the workspace, `~/aws/workspace/<your user name>` (see [Organising the workspace](#organising-the-workspace));
 - writes the job environment to `~/.config/saturn-v/env` (readable only by you), which new terminals load;
 - keeps the tunnel healthy in the background, reopening it if it drops.
@@ -85,6 +85,8 @@ These variables are set in every job, and on your laptop after `saturn connect`:
 | `MY_WORKSPACE` | `/workspace/<your user name>` | `~/aws/workspace/<your user name>` |
 | `SATELLITE` | `/vsis3/<bucket>` (read straight from S3) | `~/aws/satellite` |
 | `DATA_BUCKET`, `AWS_REGION` | the satellite bucket and AWS region | the same |
+| `DB_HOST`, `DB_PORT` | the database | `127.0.0.1` and the tunnel port |
+| `DB_USER`, `DB_PASSWORD` | the shared, read-only `aws_jobs` login | the same |
 
 So build paths and connections from them, never from fixed paths:
 
@@ -209,7 +211,7 @@ Python jobs run with [uv](https://docs.astral.sh/uv/), which installs the packag
 
   ```python
   # /// script
-  # dependencies = ["pandas", "boto3", "pyarrow"]
+  # dependencies = ["pandas", "pymysql"]
   # ///
   ```
 
@@ -228,49 +230,52 @@ saturn costs
 
 When any job ends, its cost is recorded and a summary (who, script, machine, runtime, cost) is posted to the team's Zulip channel, tagging the person who ran it. This happens in AWS, so it works even if your laptop is closed. Every Monday at 09:00 a summary of the past week follows, with jobs and spend per person, and how much each workspace folder stores, when it last changed and its last job.
 
-## Datasets
+## The database
 
-This is where to get data. The datasets are proprietary, so they can only be *queried*, never copied: you send SQL, it runs in AWS (Athena) under your name, and only the result comes back. Every query is recorded with who ran it. The same lines work on your laptop and in a job.
+The data is in `mayin-data`, a MariaDB database on Amazon RDS:
 
-| Dataset | What | Partitioned by |
-| --- | --- | --- |
-| `hhd` | CPHS household survey: `hh_consumption_monthly`, `hh_consumption_weekly`, `hh_income_monthly`, `member_income_monthly`, `people_of_india_wave`, `aspirational_wave`, `hh_char` | `year`, `state` (`hh_char`: `year`) |
-| `fld` | Prowess (`prowess_sa_*`, `prowess_ca_*`), CapEx (`capex_*`), `identity`, `ic_nse_daily`: 127 tables | `year`, for `prowess_sa_annual_expenditure`, `prowess_sa_annual_relatedparty_transaction` and `prowess_sa_daily_stocks`; the rest aren't split |
-| `maps` | Boundaries: `states`, `districts_2011`, `districts_states_hr`, `homogeneous_regions` | |
+| Database | What |
+| --- | --- |
+| `hhd` | CPHS household survey: `hh_income_monthly`, `member_income_monthly`, `hh_consumption_monthly`, `hh_consumption_weekly`, `people_of_india_wave`, `aspirational_wave`, `hh_char` |
+| `fld` | Prowess (`prowess_sa_*`, `prowess_ca_*`), CapEx (`capex_*`), `identity`, `ic_nse_daily`: 127 tables |
+| `maps` | Boundaries: `states`, `districts_2011`, `districts_states_hr`, `homogeneous_regions` |
+| `tmp` | Scratch tables |
 
-The tables have the same names and columns as in the MariaDB database they were copied from, in lower case (`prowess_sa_annual_assets_oldschedule6_disclosure`).
+Jobs and laptops share one login (`aws_jobs`), which can **only read**: queries and views, no inserts, updates, deletes or table changes. Save results as files in the workspace instead. The password reaches your code through `DB_PASSWORD`, so it never appears in a script.
 
-**Install the connector's packages once** (no DuckDB needed):
+**Install the package once:**
 
 | | On your laptop (once) | In a job |
 | --- | --- | --- |
-| R | `install.packages(c("paws", "arrow"))` | With an `renv.lock`, start the script with `library(paws)` and `library(arrow)` and run `renv::snapshot()`: renv records only packages your code names |
-| Julia | `]add AWS Parquet2 CSV DataFrames DBInterface`, in the project (`julia --project=.`) | Comes from the project's `Project.toml` |
-| Python | `uv add --script analysis.py boto3 pyarrow pandas` (or add them to `pyproject.toml` / `requirements.txt`) | Comes from the same list |
+| R | `install.packages("RMariaDB")` (and `dbplyr` for dplyr) | Already in the R image. With an `renv.lock`, keep `library(RMariaDB)` at the top of the script and run `renv::snapshot()` |
+| Julia | `]add MySQL DBInterface DataFrames`, in the project (`julia --project=.`) | Comes from the project's `Project.toml` |
+| Python | `uv add --script analysis.py pymysql pandas` (or add them to `pyproject.toml` / `requirements.txt`) | Comes from the same list |
 
-Then connect with saturn's helper, once at the top of a script:
+Then connect with saturn's helper. The same lines work on your laptop (through the tunnel) and in a job:
 
 R:
 
 ```r
-library(paws)
-library(arrow)
 source(Sys.getenv("SATURN_R"))
-con <- saturn_db("hhd")
+con <- saturn_db("fld")
 
-df <- DBI::dbGetQuery(con, "SELECT year, AVG(tot_inc) AS avg_income
-                            FROM hh_income_monthly
-                            WHERE state = 'Karnataka' AND year >= 2022 AND response_status = 'Accepted'
-                            GROUP BY year ORDER BY year")
+df <- DBI::dbGetQuery(con, "SELECT co_code, company_name FROM identity WHERE co_code IN (11, 12)")
+
+library(dplyr)    # or with dplyr: it writes the SQL, and only the result comes back
+x <- tbl(con, "identity") |> filter(co_code == 11) |> select(co_code, company_name) |> collect()
+
+DBI::dbDisconnect(con)
 ```
 
 Julia:
 
 ```julia
+using DataFrames
 include(ENV["SATURN_JL"])
-con = saturn_db("hhd")
+con = saturn_db("fld")
 
-df = DBInterface.execute(con, "SELECT * FROM member_income_monthly WHERE state = 'Karnataka' AND year = 2023 LIMIT 10") |> DataFrame
+df = DBInterface.execute(con, "SELECT co_code, company_name FROM identity WHERE co_code IN (11, 12)") |> DataFrame
+DBInterface.close!(con)
 ```
 
 Python:
@@ -278,105 +283,52 @@ Python:
 ```python
 import os
 exec(open(os.environ["SATURN_PY"]).read())
-con = saturn_db("hhd")
+con = saturn_db("fld")
 
-df = con.sql("SELECT * FROM member_income_monthly WHERE state = 'Karnataka' AND year = 2023 LIMIT 10").df()   # .df() pandas; .arrow(); .pl() polars
+df = con.sql("SELECT co_code, company_name FROM identity WHERE co_code IN (11, 12)").df()   # .df() pandas; .pl() polars
+con.close()
 ```
 
-`DBI::dbListTables(con)` (R), `saturn_tables(con)` (Julia) and `con.tables()` (Python) list the tables. A query can use another dataset's tables by name: connected to `hhd`, `SELECT company_name FROM fld.identity WHERE co_code = 11` works.
+`DBI::dbListTables(con)` (R), `saturn_tables(con)` (Julia) and `con.tables()` (Python) list the tables. A query can use another database's tables by name: connected to `hhd`, `SELECT company_name FROM fld.identity WHERE co_code = 11` works.
 
-**Maps.** The `maps` tables keep each boundary in a `shape` column, in MariaDB's format: 4 bytes, then the standard WKB. Skip the 4 bytes. The coordinates are latitude and longitude (WGS 84).
+The SQL is MariaDB's (MySQL's). Column names are as stored, mostly in capitals (`STATE`, `YEAR`, `TOT_INC`), and come back that way: `df$TOT_INC`, not `df$tot_inc`. In SQL itself, case doesn't matter.
 
-R, with sf (`install.packages("sf")`):
+**Large CPHS tables are slow to filter for now.** Most `hhd` tables have no indexes yet, so a query reads the whole table even when it asks for one state: counting Karnataka's rows in `hh_income_monthly` (12 GB) takes about 4 minutes, and `member_income_monthly` is 59 GB. Until that's improved:
+
+- **Run big `hhd` queries as a job**, not on your laptop, and save the result to the workspace for reuse.
+- **Explore with `LIMIT`** (`SELECT * FROM hh_income_monthly LIMIT 100`) before running a full query.
+- **Do the heavy work in SQL** (joins, aggregations), so only the answer travels.
+
+`fld` and `maps` have indexes and answer quickly.
+
+**Maps.** The `maps` tables keep each boundary in a `SHAPE` geometry column (latitude and longitude, WGS 84). MariaDB's spatial functions work on it directly. Which state is Bengaluru in?
+
+```sql
+SELECT st_nm FROM states WHERE ST_Contains(SHAPE, POINT(77.59, 12.97))   -- Karnataka
+```
+
+To get the shapes into R, with sf (`install.packages("sf")`):
 
 ```r
 source(Sys.getenv("SATURN_R"))
 maps <- saturn_db("maps")
 
-s <- DBI::dbGetQuery(maps, "SELECT st_nm, shape FROM states")
-s$geometry <- sf::st_as_sfc(structure(lapply(s$shape, function(b) as.raw(b)[-(1:4)]), class = "WKB"), crs = 4326)
-s <- sf::st_as_sf(s[c("st_nm", "geometry")])
+s <- DBI::dbGetQuery(maps, "SELECT st_nm, ST_AsBinary(SHAPE) AS wkb FROM states")
+s <- sf::st_as_sf(data.frame(st_nm = s$st_nm), geometry = sf::st_as_sfc(structure(s$wkb, class = "WKB"), crs = 4326))
 plot(sf::st_geometry(s))
 ```
 
-Python, with shapely (`uv add shapely`):
+In Python, `shapely.from_wkb()` reads the same `ST_AsBinary(SHAPE)` column.
 
-```python
-import os, shapely
-exec(open(os.environ["SATURN_PY"]).read())
-maps = saturn_db("maps")
+**Other clients and troubleshooting**
 
-df = maps.sql("SELECT st_nm, shape FROM states").df()
-df["geometry"] = shapely.from_wkb([b[4:] for b in df["shape"]])
-```
-
-In any language, including Julia, SQL can work with the shapes directly: `ST_GeomFromBinary(substr(shape, 5))` turns one into a geometry. Which state is Bengaluru in?
-
-```sql
-SELECT st_nm FROM states
-WHERE ST_Contains(ST_GeomFromBinary(substr(shape, 5)), ST_Point(77.59, 12.97))   -- Karnataka
-```
-
-The SQL is Athena's (Trino), close to what you know. The differences that come up:
-
-- Strings in single quotes, names in double quotes. Column names come back in lower case (`tot_inc`).
-- `year` is a whole number: `year = 2023`, not `'2023'`.
-- No `ILIKE`: use `lower(state) LIKE '%pradesh%'`. Dates: `date '2023-01-01'`, `date_trunc('month', month_slot_date)`, `year(month_slot_date)`.
-- dplyr's lazy tables don't work here: filter and summarise in SQL, then use dplyr on the result.
-
-Tips:
-
-- **Filter on `year` and `state`** whenever you can: those skip whole folders.
-- **Do the heavy work in SQL** (joins, aggregations): it runs in AWS on many machines, so only the answer travels. A query summarising all of India takes a few seconds.
-- **Large pulls are fine but slower**: half a million rows by 44 columns takes about 5 seconds. Leave out `ORDER BY` on big pulls and sort afterwards; sorted results come back as CSV, unsorted ones as compact Parquet.
-- Each query reads at most 20 GB (the whole of `hhd` is about 5 GB) and costs a fraction of a cent.
-- The data is a copy of the MariaDB databases as of 27 Oct 2026 (`hhd`) and 29 Oct 2026 (`fld`, `maps`). For tables that aren't in the datasets, see the [appendix](#appendix-the-mariadb-database).
+- The database only accepts encrypted connections; `saturn_db()` asks for that. Connecting yourself, use `client.flag = RMariaDB::CLIENT_SSL` in R or `ssl_mode=:required` in Julia; without it, R on a Mac fails with "Connections using insecure transport are prohibited".
+- Other clients work through the tunnel too: host `127.0.0.1`, port `3306`, and the user name and password from `~/.config/saturn-v/env`. For example `mysql -h 127.0.0.1 -P 3306 -u aws_jobs -p` (`brew install mysql-client`), or DBeaver, TablePlus or Sequel Ace.
+- If `echo $DB_HOST` prints nothing, this terminal doesn't have the variables: it was opened before `saturn connect` (open a new one, or run `eval "$(saturn connect)"`). In RStudio, run `readRenviron("~/.config/saturn-v/env")`.
+- If something on your laptop already uses port 3306 (a local MySQL, say), connect with `DB_LOCAL_PORT=13306 saturn connect`; `DB_PORT` then says 13306.
+- The tunnel goes through a small server on AWS, which `saturn connect` starts if it's stopped.
 
 ## Good to know
 
 - The workspace is shared by everyone. Keep to your own folder; if two people save the same file, the last save wins.
 - Folders you create in the workspace (in Finder, Terminal, R or Julia) show up in jobs, even while empty. This needs the current `saturn`: after `git pull`, run `saturn disconnect` and `saturn connect` once. Scripts are still safest creating their own output folders, e.g. `dir.create("../DOC/IMAGES", recursive = TRUE, showWarnings = FALSE)`.
-
-## Appendix: the MariaDB database
-
-Use the [datasets](#datasets) for everyday work. The `mayin-data` MariaDB database (on Amazon RDS) is still there for tables that aren't in the datasets.
-
-Jobs and laptops share one database login (`aws_jobs`). It can **only read** the `mayin-data` MariaDB databases (`fld`, `hhd`, `maps`, `tmp`, ...): queries and views, but no inserts, updates, deletes or table changes. Save results to files in the workspace instead. The password is kept in AWS Secrets Manager and reaches your code through `DB_PASSWORD`, so it never appears in a script.
-
-These variables are set in every job, and on your laptop after `saturn connect`:
-
-| Variable | In a job | On your laptop |
-| --- | --- | --- |
-| `DB_HOST`, `DB_PORT` | the database | `127.0.0.1` and the tunnel port |
-| `DB_USER`, `DB_PASSWORD` | the shared `aws_jobs` login | the same |
-
-R (add `RMariaDB` to the project's `renv.lock`):
-
-```r
-con <- DBI::dbConnect(RMariaDB::MariaDB(),
-  host = Sys.getenv("DB_HOST"), port = as.integer(Sys.getenv("DB_PORT")),
-  user = Sys.getenv("DB_USER"), password = Sys.getenv("DB_PASSWORD"),
-  dbname = "fld", client.flag = RMariaDB::CLIENT_SSL)
-df <- DBI::dbGetQuery(con, "SELECT co_code, company_name FROM identity LIMIT 10")
-DBI::dbDisconnect(con)
-```
-
-Julia (add `MySQL`, `DBInterface` and `DataFrames` to the `Project.toml`):
-
-```julia
-using MySQL, DBInterface, DataFrames
-con = DBInterface.connect(MySQL.Connection, ENV["DB_HOST"], ENV["DB_USER"], ENV["DB_PASSWORD"];
-                          port=parse(Int, ENV["DB_PORT"]), db="fld", ssl_mode=:required)
-df = DBInterface.execute(con, "SELECT co_code, company_name FROM identity LIMIT 10") |> DataFrame
-DBInterface.close!(con)
-```
-
-The database only accepts encrypted connections. That's what `client.flag = RMariaDB::CLIENT_SSL` and `ssl_mode=:required` ask for; without them, R on a Mac fails with "Connections using insecure transport are prohibited".
-
-Other database clients work through the tunnel too: host `127.0.0.1`, port `3306`, and the user name and password from `~/.config/saturn-v/env`. For example `mysql -h 127.0.0.1 -P 3306 -u aws_jobs -p` (`brew install mysql-client`), or a GUI such as DBeaver, TablePlus or Sequel Ace.
-
-If `echo $DB_HOST` prints nothing, this terminal doesn't have the variables: it was opened before `saturn connect` (open a new one, or run `eval "$(saturn connect)"`), or the setup line is missing from `~/.zshrc`. In RStudio, run `readRenviron("~/.config/saturn-v/env")`.
-
-If something on your laptop already uses port 3306 (a local MySQL, say), connect with `DB_LOCAL_PORT=13306 saturn connect`; `DB_PORT` then says 13306.
-
-The tunnel goes through a small server on AWS, which `saturn connect` starts if it's stopped.

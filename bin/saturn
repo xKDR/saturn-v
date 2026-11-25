@@ -16,7 +16,7 @@
 #   saturn cost <task-id>                 # (re)compute one job's cost
 #
 # After `saturn connect`, this laptop has the same environment variables as a job
-# (WORKSPACE, MY_WORKSPACE, SATELLITE, DATASETS, DATA_BUCKET, AWS_REGION, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD),
+# (WORKSPACE, MY_WORKSPACE, SATELLITE, DATA_BUCKET, AWS_REGION, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD),
 # pointing at the local mounts and the database tunnel, so the same code runs in both.
 # They're kept in ~/.config/saturn-v/env; `eval "$(saturn connect)"` also sets them in
 # the current terminal.
@@ -412,8 +412,6 @@ run_job() {
   [[ $lang == julia ]] && helper="$SATURN_HOME/lib/saturn.jl"
   [[ $lang == python ]] && helper="$SATURN_HOME/lib/saturn.py"
   envs=("MY_WORKSPACE=/workspace/$(my_folder)" ${envs[@]+"${envs[@]}"})
-  # saturn_db() in the job queries the datasets through Athena.
-  envs+=("SATURN_ATHENA_WORKGROUP=$(cfg athena_workgroup)" "SATURN_ATHENA_RESULTS=$(cfg athena_results_bucket)")
   overrides=$(JOB_CPU=$cpu JOB_MEMORY=$memory ENVS=$(printf '%s\n' ${envs[@]+"${envs[@]}"}) HELPER_FILE=$helper python3 -c '
 import base64, gzip, json, os, sys
 container, launcher, args = sys.argv[1], sys.argv[2], sys.argv[3:]
@@ -468,6 +466,7 @@ print("{:25} {:6} {:8.2f} {:9.2f}".format("total", len(rows), sum(v[1] for v in 
 
 WORKSPACE_DIR="${WORKSPACE_DIR:-$HOME/aws/workspace}"
 SATELLITE_DIR="${SATELLITE_DIR:-$HOME/aws/satellite}"
+# No longer mounted (the data is queried in the database); kept to unmount older mounts.
 DATASETS_DIR="${DATASETS_DIR:-$HOME/aws/datasets}"
 VFS_FLAGS=(--vfs-cache-mode full --vfs-cache-max-size 20G --dir-cache-time 30s --log-level NOTICE)
 
@@ -598,18 +597,21 @@ do_mount() {
   elif [[ $(uname) != Darwin ]]; then
     die "mounting works on macOS and Linux only"
   fi
-  local workspace data datasets
+  local workspace data
   workspace=$(cfg workspace_bucket)
   data=$(cfg data_bucket)
-  datasets=$(cfg datasets_bucket)
   # In a subshell: the mount key's settings must apply to rclone only, not to the
   # commands that follow (which run as you).
   (
     use_rclone_credentials
     mount_workspace "$workspace"
     mount_readonly "$data" "$SATELLITE_DIR" satellite
-    mount_readonly "$datasets" "$DATASETS_DIR" datasets
   ) || exit 1
+  # The Parquet datasets were mounted here until Nov 2026; the data is now queried in the database.
+  if is_mounted "$DATASETS_DIR"; then
+    if [[ $(uname) == Linux ]]; then fusermount3 -u "$DATASETS_DIR" 2>/dev/null || fusermount -u "$DATASETS_DIR" 2>/dev/null || true
+    else umount "$DATASETS_DIR" 2>/dev/null || true; fi
+  fi
   svn_ignore_appledouble
 }
 
@@ -753,7 +755,7 @@ start_keeper() {
 }
 
 stop_keeper() {
-  [[ -f $STATE_DIR/keeper.pid ]] && kill "$(cat "$STATE_DIR/keeper.pid")" 2>/dev/null
+  [[ -f $STATE_DIR/keeper.pid ]] && kill "$(cat "$STATE_DIR/keeper.pid")" 2>/dev/null || true # a stale pid must not stop connect (set -e)
   rm -f "$STATE_DIR/keeper.pid"
 }
 
@@ -781,28 +783,17 @@ import json, os, sys
 s = json.loads(sys.argv[1])
 env = {
     "WORKSPACE": sys.argv[2], "SATELLITE": sys.argv[3], "DATA_BUCKET": sys.argv[4], "AWS_REGION": sys.argv[5],
-    "DATASETS": sys.argv[7], "SATURN_R": sys.argv[8] + "/lib/saturn.R", "SATURN_JL": sys.argv[8] + "/lib/saturn.jl",
-    "SATURN_PY": sys.argv[8] + "/lib/saturn.py",
-    "MY_WORKSPACE": sys.argv[2] + "/" + sys.argv[9],
+    "SATURN_R": sys.argv[7] + "/lib/saturn.R", "SATURN_JL": sys.argv[7] + "/lib/saturn.jl",
+    "SATURN_PY": sys.argv[7] + "/lib/saturn.py",
+    "MY_WORKSPACE": sys.argv[2] + "/" + sys.argv[8],
     # renv installs the packages of a project on this laptop, not into its folder in the
     # shared workspace (slow over the mount, and the job installs its own anyway).
     "RENV_PATHS_LIBRARY_ROOT": os.path.expanduser("~/.local/share/renv/library"),
     "DB_HOST": "127.0.0.1", "DB_PORT": sys.argv[6], "DB_USER": s["username"], "DB_PASSWORD": s["password"],
 }
-# saturn_db() signs in to Athena with this profile. (DATASETS_S3, the direct path to the datasets,
-# goes once the datasets can only be queried; see xKDR/AWS-Server HANDOFF.md.)
-if sys.argv[10]:
-    env["DATASETS_S3"] = "s3://" + sys.argv[10]
-    env["SATURN_AWS_PROFILE"] = sys.argv[11]
-# saturn_db() queries the datasets through Athena (xKDR/AWS-Server query.tf).
-if sys.argv[12]:
-    env["SATURN_ATHENA_WORKGROUP"] = sys.argv[12]
-    env["SATURN_ATHENA_RESULTS"] = sys.argv[13]
 print("# Written by `saturn connect`, removed by `saturn disconnect`. Same names as inside a job.")
 for k, v in env.items(): print(f"{k}={v}")' "$secret" "$WORKSPACE_DIR" "$SATELLITE_DIR" "$(cfg data_bucket)" \
-      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$DATASETS_DIR" "$SATURN_HOME" "$(my_folder)" \
-      "$(uses_sso && cfg datasets_bucket)" "$AWS_PROFILE" \
-      "$(cfg athena_workgroup 2>/dev/null)" "$(cfg athena_results_bucket 2>/dev/null)" >"$ENV_FILE"
+      "$AWS_DEFAULT_REGION" "$DB_LOCAL_PORT" "$SATURN_HOME" "$(my_folder)" >"$ENV_FILE"
   )
   echo "Environment written to $ENV_FILE"
 }
@@ -843,7 +834,7 @@ do_disconnect() {
 }
 
 do_status() {
-  mount | grep -E " on ($WORKSPACE_DIR|$SATELLITE_DIR|$DATASETS_DIR) " || echo "workspace, satellite and datasets: not mounted"
+  mount | grep -E " on ($WORKSPACE_DIR|$SATELLITE_DIR) " || echo "workspace and satellite data: not mounted"
   if our_tunnel && tunnel_alive; then
     echo "database: tunnel open on 127.0.0.1:$DB_LOCAL_PORT"
   elif our_tunnel; then

@@ -179,10 +179,7 @@ func (s *session) runJob(ctx context.Context, args []string) error {
 	zw, _ := gzip.NewWriterLevel(&packed, gzip.BestCompression)
 	zw.Write(helper)
 	zw.Close()
-	envs = append(envs, types.KeyValuePair{Name: aws.String("SATURN_HELPER"), Value: aws.String(base64.StdEncoding.EncodeToString(packed.Bytes()))},
-		// saturn_db() in the job queries the datasets through Athena.
-		types.KeyValuePair{Name: aws.String("SATURN_ATHENA_WORKGROUP"), Value: aws.String(s.dep.AthenaWorkgroup)},
-		types.KeyValuePair{Name: aws.String("SATURN_ATHENA_RESULTS"), Value: aws.String(s.dep.AthenaResultsBucket)})
+	envs = append(envs, types.KeyValuePair{Name: aws.String("SATURN_HELPER"), Value: aws.String(base64.StdEncoding.EncodeToString(packed.Bytes()))})
 	overrides := &types.TaskOverride{ContainerOverrides: []types.ContainerOverride{{
 		Name:        aws.String(l.Container),
 		Command:     append([]string{"bash", "-c", string(launcher), l.Container}, args...),
